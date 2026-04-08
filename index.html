@@ -1076,119 +1076,261 @@ function pInv(){
 }
 
 // ─── SHELF LIFE ───────────────────────────────
+if(!window._slfExpanded)window._slfExpanded={};
+
+// Build one lot-row div (used for previous and older lots)
+function slfLotRow(lt, ld, ldl, lcol, lpct, li2, isRecent){
+  var border = isRecent ? ';border-left:3px solid var(--at)' : '';
+  var badge  = isRecent
+    ? '<span style="font-size:9px;background:var(--ab);color:var(--at);'
+      +'padding:1px 6px;border-radius:20px;font-weight:600">Previous Lot</span>'
+    : '';
+  var setBtn = li2>=0
+    ? '<button class="btn xs" data-action="set-cur-lot" data-li="'+li2
+      +'" data-lt="'+lt.replace(/"/g,'&quot;')+'" style="font-size:9px;padding:2px 5px"'
+      +' title="Switch to this lot">\u2605 Set</button>'
+    : '';
+  var barHtml = lpct>0
+    ? '<div class="pbar" style="height:5px">'
+      +'<div class="pfill" style="width:'+lpct+'%;background:'+lcol+'"></div></div>'
+    : '';
+  var mfdVal  = (ld && ld.mfd) ? fd(ld.mfd) : '\u2014';
+  var expVal  = (ld && ld.exp) ? fd(ld.exp) : '\u2014';
+  return '<div style="background:var(--S2);border-radius:var(--R);padding:8px 10px;'
+    +'border:1px solid var(--bd)'+border+';margin-bottom:0">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'
+    +'<div style="display:flex;align-items:center;gap:6px">'
+    +'<span style="font-family:monospace;font-size:11px;font-weight:600;color:var(--mx)">'+lt+'</span>'
+    +badge
+    +'</div>'
+    +'<div style="display:flex;align-items:center;gap:4px">'+slfBadge(ldl)+setBtn+'</div>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center;margin-bottom:'
+    +(lpct>0?'5':'0')+'px">'
+    +'<div><div style="font-size:9px;color:var(--hx);text-transform:uppercase;letter-spacing:.5px">MFD</div>'
+    +'<div style="font-size:11.5px;font-weight:500">'+mfdVal+'</div></div>'
+    +'<div><div style="font-size:9px;color:var(--hx);text-transform:uppercase;letter-spacing:.5px">Used</div>'
+    +'<div style="font-size:11.5px;color:'+lcol+'">'+lpct+'%</div></div>'
+    +'<div><div style="font-size:9px;color:var(--hx);text-transform:uppercase;letter-spacing:.5px">Expiry</div>'
+    +'<div style="font-size:11.5px;color:'+lcol+'">'+expVal+'</div></div>'
+    +'</div>'
+    +barHtml
+    +'</div>';
+}
+
+// Toggle expand/collapse for a single card's older lots section
+function toggleSlfExpand(name){
+  if(!window._slfExpanded)window._slfExpanded={};
+  window._slfExpanded[name] = !window._slfExpanded[name];
+  try{ document.getElementById('content').innerHTML = buildPane(); }catch(e){ console.error(e); }
+}
+
 function pShelfLife(){
-  const q=(FV.slf||"").toLowerCase(),f=FV["slf-f"]||"all";
-  const prodFilter=FV["slf-prod"]||"";
-  const sortBy=FV["slf-sort"]||"newest"; // default: newest added first
-  let rows=S.inv.filter(r=>{
-    if(r._slfHidden)return false;
-    if(q&&!r.name.toLowerCase().includes(q)&&!r.lot.toLowerCase().includes(q))return false;
-    if(prodFilter&&r.name!==prodFilter)return false;
+  if(!window._slfExpanded)window._slfExpanded={};
+  var q          = (FV.slf||'').toLowerCase();
+  var f          = FV['slf-f']   || 'all';
+  var prodFilter = FV['slf-prod'] || '';
+  var sortBy     = FV['slf-sort'] || 'newest';
+
+  // ── Filter rows
+  var rows = S.inv.filter(function(r){
+    if(r._slfHidden) return false;
+    if(q && !r.name.toLowerCase().includes(q) && !(r.lot||'').toLowerCase().includes(q)) return false;
+    if(prodFilter && r.name !== prodFilter) return false;
     return true;
   });
-  if(f==="critical")rows=rows.filter(r=>{const d=daysLeft(r.exp);return d!==null&&d<=14;});
-  else if(f==="warning")rows=rows.filter(r=>{const d=daysLeft(r.exp);return d!==null&&d>14&&d<=CFG.warnDays;});
-  else if(f==="expired")rows=rows.filter(r=>{const d=daysLeft(r.exp);return d!==null&&d<0;});
-  else if(f==="good")rows=rows.filter(r=>{const d=daysLeft(r.exp);return d===null||d>CFG.warnDays;});
-  if(sortBy==="name")rows=rows.sort((a,b)=>a.name.localeCompare(b.name));
-  else if(sortBy==="pct")rows=rows.sort((a,b)=>slfPct(b.mfd,b.exp)-slfPct(a.mfd,a.exp));
-  else if(sortBy==="exp")rows=rows.sort((a,b)=>(daysLeft(a.exp)!==null?daysLeft(a.exp):9999)-(daysLeft(b.exp)!==null?daysLeft(b.exp):9999));
-  else rows=rows.slice().reverse(); // "newest" = reverse insertion order (most recently added first)
-  return`
-  <div style="background:var(--S);border:1px solid var(--bd);border-radius:var(--RL);padding:13px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
-    <div><div style="font-size:13px;font-weight:500">Warning threshold</div><div style="font-size:11px;color:var(--hx)">Alert when shelf life is below N days</div></div>
-    <div style="display:flex;align-items:center;gap:8px;"><input class="fi" id="warn-days-inp" type="number" value="${CFG.warnDays}" style="width:80px"><button class="btn sm pr" data-action="set-warn-days">Update</button></div>
-  </div>
-  <div class="frow">
-    <input class="si" placeholder="🔍 Search…" value="${FV.slf||""}" data-filter="slf">
-    <select class="si" data-filter="slf-f" style="width:145px">
-      <option value="all" ${f==="all"?"selected":""}>All products</option>
-      <option value="critical" ${f==="critical"?"selected":""}>🔴 Critical (≤14d)</option>
-      <option value="warning" ${f==="warning"?"selected":""}>🟡 Warning</option>
-      <option value="expired" ${f==="expired"?"selected":""}>💀 Expired</option>
-      <option value="good" ${f==="good"?"selected":""}>🟢 Good</option>
-    </select>
-    <select class="si" data-filter="slf-prod" style="width:170px">
-      <option value="">All products</option>
-      ${[...new Set(S.inv.map(r=>r.name))].sort().map(n=>`<option value="${n}" ${(FV["slf-prod"]||"")===n?"selected":""}>${n}</option>`).join("")}
-    </select>
-    <select class="si" data-filter="slf-sort" style="width:140px">
-      <option value="newest" ${(FV["slf-sort"]||"newest")==="newest"?"selected":""}>Sort: Newest First</option>
-      <option value="exp" ${(FV["slf-sort"]||"")==="exp"?"selected":""}>Sort: Expiry ↑</option>
-      <option value="name" ${(FV["slf-sort"]||"")==="name"?"selected":""}>Sort: Name</option>
-      <option value="pct" ${(FV["slf-sort"]||"")==="pct"?"selected":""}>Sort: Used %</option>
-    </select>
-  </div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;">
-    ${rows.length?rows.map(r=>{
-      // Find lot group for this product to get per-lot dates
-      const lotGroup=S.lot.find(l=>l.name===r.name);
-      const allLots=lotGroup?lotGroup.lots:[];
-      const lotDates=lotGroup?lotGroup.lotDates||{}:{};
-      const dl=daysLeft(r.exp),pct=slfPct(r.mfd,r.exp),col=slfColor(dl);
-      // Build other-lots rows
-      const li2=lotGroup?S.lot.indexOf(lotGroup):-1;
-      const otherLots=allLots.filter(lt=>lt!==r.lot).map((lt,ti2)=>{
-        const ld=lotDates[lt]||{};
-        const ldl=ld.exp?daysLeft(ld.exp):null;
-        const lpct=slfPct(ld.mfd,ld.exp);
-        const lcol=slfColor(ldl);
-        const realTi=allLots.indexOf(lt);
-        return`<div style="background:var(--S2);border-radius:var(--R);padding:8px 10px;margin-top:6px;border:1px solid var(--bd)">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-            <span style="font-family:'DM Mono',monospace;font-size:11px;font-weight:600;color:var(--mx)">${lt}</span>
-            <div style="display:flex;align-items:center;gap:4px">
-              ${slfBadge(ldl)}
-              ${li2>=0?`<button class="btn xs" onclick="setCurrentLot(${li2},'${lt}')" style="font-size:9px;padding:2px 5px" title="Set as current lot">★ Set Current</button>`:""}
-            </div>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center;margin-bottom:5px">
-            <div><div style="font-size:9px;color:var(--hx);text-transform:uppercase;letter-spacing:.5px">MFD</div><div style="font-size:11.5px;font-weight:500">${ld.mfd?fd(ld.mfd):"—"}</div></div>
-            <div><div style="font-size:9px;color:var(--hx);text-transform:uppercase;letter-spacing:.5px">Used</div><div style="font-size:11.5px;color:${lcol}">${lpct}%</div></div>
-            <div><div style="font-size:9px;color:var(--hx);text-transform:uppercase;letter-spacing:.5px">Expiry</div><div style="font-size:11.5px;color:${lcol}">${ld.exp?fd(ld.exp):"—"}</div></div>
-          </div>
-          ${lpct>0?`<div class="pbar" style="height:5px"><div class="pfill" style="width:${lpct}%;background:${lcol}"></div></div>`:""}
-        </div>`;
-      }).join("");
-      // Simple lot count badge
-      const lotCountBadge=allLots.length>1?('<div style="margin-top:4px;font-size:11px;color:var(--hx)">'+allLots.length+' lots in tracking</div>'):'';
-      return`<div class="card" style="border-left:3px solid ${col}">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
-          <div style="flex:1"><div style="font-weight:600;font-size:13.5px">${r.name}</div>
-          <div style="font-size:11px;color:var(--at);font-family:'DM Mono',monospace;margin-top:2px">${r.lot} ✓ current · ${N(r.qty)} ${r.unit}</div>
-          ${lotCountBadge}
-          </div>
-          <div style="display:flex;align-items:center;gap:5px">
-            ${slfBadge(dl)}
-            <button class="btn xs" onclick="editProductShelfLife(${S.inv.indexOf(r)})" title="Edit MFD/Expiry dates">✏</button>
-            <button class="btn xs dn" onclick="clearProductShelfLife(${S.inv.indexOf(r)})" title="Clear shelf life dates">✕</button>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;text-align:center;">
-          <div><div style="font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">MFD</div><div style="font-size:12.5px;font-weight:500">${r.mfd?fd(r.mfd):"—"}</div></div>
-          <div><div style="font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">Used</div><div style="font-size:12.5px;font-weight:500;color:${col}">${pct}%</div></div>
-          <div><div style="font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">Expires</div><div style="font-size:12.5px;font-weight:500;color:${col}">${r.exp?fd(r.exp):"—"}</div></div>
-        </div>
-        <div class="pbar" style="height:8px;margin-bottom:5px"><div class="pfill" style="width:${pct}%;background:${col}"></div></div>
-        <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--hx);margin-bottom:${otherLots?"8px":"0"}"><span>${r.mfd?fd(r.mfd):"MFD?"}</span><span style="color:${col};font-weight:500">${dl===null?"—":dl<0?"EXPIRED":dl+" days left"}</span><span>${r.exp?fd(r.exp):"EXP?"}</span></div>
-        ${otherLots?`<div style="font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px">Other Lots</div>${otherLots}`:""}
-        <div class="slf-lot-info"></div>
-      </div>`;
-    }).join(""):`<div style="color:var(--hx);padding:40px;text-align:center;grid-column:1/-1">No products match this filter.</div>`}
-  </div>
-  ${(function(){
-    if(f!=="all"||!S.inv.filter(r=>!r._slfHidden&&!r.mfd&&!r.exp&&(prodFilter?r.name===prodFilter:true)).length)return"";
-    var wd=S.inv.filter(r=>!r._slfHidden&&!r.mfd&&!r.exp&&(prodFilter?r.name===prodFilter:true));
-    return'<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)">'
-      +'<div style="font-size:11px;color:var(--hx);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Products without shelf life dates ('+wd.length+')</div>'
-      +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;">'
-      +wd.map(function(w){return'<div class="card" style="border-left:3px solid var(--bd2);display:flex;align-items:center;justify-content:space-between;padding:10px 14px">'
-        +'<div><div style="font-size:13px;font-weight:500">'+w.name+'</div>'
-        +'<div style="font-size:11px;color:var(--hx);font-family:monospace">'+w.lot+' \xb7 '+N(w.qty)+' '+w.unit+'</div></div>'
-        +'<button class="btn xs pr" onclick="editProductShelfLife('+S.inv.indexOf(w)+')">+ Add Dates</button></div>';}).join("")
+  if(f==='critical') rows = rows.filter(function(r){ var d=daysLeft(r.exp); return d!==null&&d<=14; });
+  else if(f==='warning') rows = rows.filter(function(r){ var d=daysLeft(r.exp); return d!==null&&d>14&&d<=CFG.warnDays; });
+  else if(f==='expired') rows = rows.filter(function(r){ var d=daysLeft(r.exp); return d!==null&&d<0; });
+  else if(f==='good')    rows = rows.filter(function(r){ var d=daysLeft(r.exp); return d===null||d>CFG.warnDays; });
+
+  // ── Sort rows
+  if(sortBy==='name')    rows = rows.slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
+  else if(sortBy==='pct')rows = rows.slice().sort(function(a,b){ return slfPct(b.mfd,b.exp)-slfPct(a.mfd,a.exp); });
+  else if(sortBy==='exp')rows = rows.slice().sort(function(a,b){
+    var da=daysLeft(a.exp); var db=daysLeft(b.exp);
+    return (da!==null?da:9999)-(db!==null?db:9999);
+  });
+  else rows = rows.slice().reverse(); // newest = reverse insertion order
+
+  // ── Build cards
+  var cardsHtml = rows.length ? rows.map(function(r){
+    var invIdx   = S.inv.indexOf(r);
+    var lotGroup = S.lot.find(function(l){ return l.name===r.name; });
+    // allLots newest-first: reverse the stored array (oldest first → newest first)
+    var allLots  = lotGroup ? lotGroup.lots.slice().reverse() : [];
+    var lotDates = lotGroup ? (lotGroup.lotDates||{}) : {};
+    var li2      = lotGroup ? S.lot.indexOf(lotGroup) : -1;
+    var dl       = daysLeft(r.exp);
+    var pct      = slfPct(r.mfd, r.exp);
+    var col      = slfColor(dl);
+    var isExpanded = !!window._slfExpanded[r.name];
+
+    // Previous lot = first in allLots that isn't current
+    var prevLot = null;
+    for(var pi=0;pi<allLots.length;pi++){ if(allLots[pi]!==r.lot){ prevLot=allLots[pi]; break; } }
+    var prevLd  = prevLot ? (lotDates[prevLot]||{}) : null;
+    var prevDl  = (prevLd && prevLd.exp) ? daysLeft(prevLd.exp) : null;
+    var prevPct = prevLd ? slfPct(prevLd.mfd, prevLd.exp) : 0;
+    var prevCol = slfColor(prevDl);
+
+    // Older lots = everything except current and previous
+    var olderLots = allLots.filter(function(lt){ return lt!==r.lot && lt!==prevLot; });
+    var olderCount = olderLots.length;
+
+    // ── Build older lots HTML (only when expanded)
+    var olderHtml = '';
+    if(isExpanded){
+      olderHtml = olderLots.map(function(lt){
+        var ld   = lotDates[lt] || {};
+        var ldl  = ld.exp ? daysLeft(ld.exp) : null;
+        var lpct = slfPct(ld.mfd, ld.exp);
+        var lcol = slfColor(ldl);
+        return slfLotRow(lt, ld, ldl, lcol, lpct, li2, false);
+      }).join('');
+    }
+
+    // ── Drop-down toggle button label
+    var dropBtnLabel = isExpanded
+      ? '\u25b2 Minimise older lots'
+      : '\u25bc ' + olderCount + ' older lot' + (olderCount!==1?'s':'');
+
+    // safe name for onclick attribute
+    var safeName = r.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+
+    // ── Current lot bar
+    var mfdDisp = r.mfd ? fd(r.mfd) : '\u2014';
+    var expDisp = r.exp ? fd(r.exp) : '\u2014';
+    var daysDisp= dl===null ? '\u2014' : dl<0 ? 'EXPIRED' : dl+' days left';
+
+    var html = '';
+    html += '<div class="card" style="border-left:3px solid '+col+'">';
+
+    // Header row
+    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">';
+    html +=   '<div style="flex:1;min-width:0">';
+    html +=     '<div style="font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+r.name+'</div>';
+    html +=     '<div style="font-size:11px;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">';
+    html +=       '<span style="font-family:monospace;color:var(--at)">'+r.lot+'</span>';
+    html +=       '<span style="color:var(--hx);font-size:10px">\u2713 Current</span>';
+    html +=       '<span style="color:var(--hx)">\xb7 '+N(r.qty)+' '+r.unit+'</span>';
+    if(allLots.length>1) html += '<span style="color:var(--hx);font-size:10px">\xb7 '+allLots.length+' lots</span>';
+    html +=     '</div>';
+    html +=   '</div>';
+    html +=   '<div style="display:flex;align-items:center;gap:4px;flex-shrink:0;margin-left:8px">';
+    html +=     slfBadge(dl);
+    html +=     '<button class="btn xs" onclick="editProductShelfLife('+invIdx+')" title="Edit dates">\u270f</button>';
+    html +=     '<button class="btn xs dn" onclick="clearProductShelfLife('+invIdx+')" title="Clear dates">\u2715</button>';
+    html +=   '</div>';
+    html += '</div>';
+
+    // Current lot stats grid
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;text-align:center">';
+    html +=   '<div><div style="font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">MFD</div>'
+             +'<div style="font-size:12.5px;font-weight:500">'+mfdDisp+'</div></div>';
+    html +=   '<div><div style="font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">Used</div>'
+             +'<div style="font-size:12.5px;font-weight:600;color:'+col+'">'+pct+'%</div></div>';
+    html +=   '<div><div style="font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">Expires</div>'
+             +'<div style="font-size:12.5px;font-weight:500;color:'+col+'">'+expDisp+'</div></div>';
+    html += '</div>';
+
+    // Shelf life progress bar
+    html += '<div class="pbar" style="height:8px;margin-bottom:5px">'
+           +'<div class="pfill" style="width:'+pct+'%;background:'+col+'"></div></div>';
+    html += '<div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--hx);margin-bottom:12px">'
+           +'<span>'+(r.mfd?fd(r.mfd):'MFD?')+'</span>'
+           +'<span style="color:'+col+';font-weight:600">'+daysDisp+'</span>'
+           +'<span>'+(r.exp?fd(r.exp):'EXP?')+'</span>'
+           +'</div>';
+
+    // Previous lot — always visible
+    if(prevLot){
+      html += '<div style="margin-bottom:6px">'
+             + slfLotRow(prevLot, prevLd, prevDl, prevCol, prevPct, li2, true)
+             +'</div>';
+    }
+
+    // Older lots dropdown toggle
+    if(olderCount > 0){
+      html += '<button onclick="toggleSlfExpand(\''+safeName+'\')" '
+             +'style="width:100%;padding:6px 10px;background:var(--S2);border:1px solid var(--bd);'
+             +'border-radius:var(--R);color:var(--hx);font-size:11.5px;cursor:pointer;'
+             +'text-align:center;font-family:inherit;transition:background .12s" '
+             +'onmouseover="this.style.background=\'var(--S3)\'" '
+             +'onmouseout="this.style.background=\'var(--S2)\'">'
+             +dropBtnLabel+'</button>';
+      if(isExpanded){
+        html += '<div style="margin-top:6px;display:flex;flex-direction:column;gap:5px">'+olderHtml+'</div>';
+      }
+    }
+
+    html += '</div>'; // close card
+    return html;
+  }).join('') : '<div style="color:var(--hx);padding:40px;text-align:center;grid-column:1/-1">No products match this filter.</div>';
+
+  // ── Products without shelf life dates
+  var withoutDates = (f==='all')
+    ? S.inv.filter(function(r){ return !r._slfHidden&&!r.mfd&&!r.exp&&(prodFilter?r.name===prodFilter:true); })
+    : [];
+  var withoutHtml = '';
+  if(withoutDates.length){
+    withoutHtml = '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--bd)">'
+      +'<div style="font-size:11px;color:var(--hx);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">'
+      +'No shelf life dates ('+withoutDates.length+')</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px">'
+      +withoutDates.map(function(w){
+        return '<div class="card" style="border-left:3px solid var(--bd2);display:flex;'
+          +'align-items:center;justify-content:space-between;padding:10px 14px">'
+          +'<div><div style="font-size:13px;font-weight:500">'+w.name+'</div>'
+          +'<div style="font-size:11px;color:var(--hx);font-family:monospace">'+w.lot+' \xb7 '+N(w.qty)+' '+w.unit+'</div></div>'
+          +'<button class="btn xs pr" onclick="editProductShelfLife('+S.inv.indexOf(w)+')">+ Add Dates</button>'
+          +'</div>';
+      }).join('')
       +'</div></div>';
-  })()}
-  `;
+  }
+
+  // ── Product dropdown options
+  var prodNames = [];
+  S.inv.forEach(function(r){ if(!prodNames.includes(r.name)) prodNames.push(r.name); });
+  prodNames.sort();
+  var prodOpts = prodNames.map(function(n){
+    return '<option value="'+n+'" '+(prodFilter===n?'selected':'')+'>'+n+'</option>';
+  }).join('');
+
+  return ''
+    +'<div style="background:var(--S);border:1px solid var(--bd);border-radius:var(--RL);padding:13px 16px;'
+    +'margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">'
+    +'<div><div style="font-size:13px;font-weight:500">\u23f1 Expiry Warning Threshold</div>'
+    +'<div style="font-size:11px;color:var(--hx)">Warn when shelf life drops below N days</div></div>'
+    +'<div style="display:flex;align-items:center;gap:8px">'
+    +'<input class="fi" id="warn-days-inp" type="number" value="'+CFG.warnDays+'" style="width:80px">'
+    +'<button class="btn sm pr" data-action="set-warn-days">Update</button>'
+    +'</div></div>'
+    +'<div class="frow">'
+    +'<input class="si" placeholder="\ud83d\udd0d Search product or lot\u2026" value="'+(FV.slf||'')+'" data-filter="slf">'
+    +'<select class="si" data-filter="slf-f" style="width:145px">'
+    +'<option value="all" '+(f==='all'?'selected':'')+'>All products</option>'
+    +'<option value="critical" '+(f==='critical'?'selected':'')+'>🔴 Critical (\u226414d)</option>'
+    +'<option value="warning" '+(f==='warning'?'selected':'')+'>🟡 Warning</option>'
+    +'<option value="expired" '+(f==='expired'?'selected':'')+'>💀 Expired</option>'
+    +'<option value="good" '+(f==='good'?'selected':'')+'>🟢 Good</option>'
+    +'</select>'
+    +'<select class="si" data-filter="slf-prod" style="width:175px">'
+    +'<option value="">All products</option>'+prodOpts
+    +'</select>'
+    +'<select class="si" data-filter="slf-sort" style="width:145px">'
+    +'<option value="newest" '+(sortBy==='newest'?'selected':'')+'>\u23ec Newest First</option>'
+    +'<option value="exp" '+(sortBy==='exp'?'selected':'')+'>📅 Expiry \u2191</option>'
+    +'<option value="name" '+(sortBy==='name'?'selected':'')+'>🔤 Name A\u2013Z</option>'
+    +'<option value="pct" '+(sortBy==='pct'?'selected':'')+'>📊 Used % \u2193</option>'
+    +'</select>'
+    +'<button onclick="window._slfExpanded={};try{document.getElementById(\'content\').innerHTML=buildPane();}catch(e){}" '
+    +'class="btn sm" title="Collapse all expanded sections" style="color:var(--hx)">\u25b2 Reset All</button>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">'
+    +cardsHtml
+    +'</div>'
+    +withoutHtml;
 }
 
 // ─── VENDORS ──────────────────────────────────
