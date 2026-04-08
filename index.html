@@ -59,7 +59,12 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);font-
 .logo-txt{font-family:'Syne',sans-serif;font-size:20px;font-weight:800;color:var(--ac);letter-spacing:-0.5px;}
 .logo-v{font-size:10px;color:var(--hx);letter-spacing:2px;text-transform:uppercase;margin-top:2px;}
 .nav{flex:1;padding:8px 0;overflow-y:auto;}
-.nav-sec{padding:10px 16px 3px;font-size:9.5px;letter-spacing:2px;text-transform:uppercase;color:var(--hx);font-weight:600;}
+.nav-sec{padding:7px 12px 3px 14px;font-size:9.5px;letter-spacing:1.5px;text-transform:uppercase;color:var(--hx);font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none;transition:background .12s,color .12s;border-radius:var(--R);margin:2px 6px 0;}
+.nav-sec:hover{color:var(--mx);background:var(--S2);}
+.nav-sec-arrow{font-size:8px;transition:transform .25s cubic-bezier(.4,0,.2,1);display:inline-block;opacity:.7;}
+.nav-sec-arrow.collapsed{transform:rotate(-90deg);}
+.nav-group{overflow:hidden;transition:max-height .25s ease;}
+.nav-group.collapsed{max-height:0!important;}
 .nav-btn{display:flex;align-items:center;gap:9px;width:100%;padding:9px 16px;background:none;border:none;color:var(--mx);font-size:13px;font-family:'DM Sans',sans-serif;cursor:pointer;text-align:left;border-left:3px solid transparent;transition:background .1s,color .1s;position:relative;}
 .nav-btn:hover{background:var(--S2);color:var(--tx);}
 .nav-btn.on{background:rgba(217,119,6,.1);color:var(--at);border-left-color:var(--ac);font-weight:500;}
@@ -331,6 +336,10 @@ input.fi[readonly]{color:var(--hx);cursor:default;}
     <div class="logo-wrap">
       <div class="logo-txt">FINEST</div>
       <div class="logo-v">Warehouse Pro</div>
+    </div>
+    <div style="display:flex;gap:4px;padding:8px 12px 4px;border-bottom:1px solid var(--bd)">
+      <button class="btn xs" onclick="collapseAllNav()" title="Collapse all sections" style="flex:1;font-size:10px;padding:4px">▲ All</button>
+      <button class="btn xs" onclick="expandAllNav()" title="Expand all sections" style="flex:1;font-size:10px;padding:4px">▼ All</button>
     </div>
     <nav class="nav" id="nav-el"></nav>
     <div class="sb-foot">
@@ -795,21 +804,101 @@ function buildNav(){
   const lows=lowItems().length,exps=expSoon().filter(r=>daysLeft(r.exp)<=14).length;
   const pktLows=lowPktItems().length;
   const pend=S.ord.filter(o=>o.status==="pending").length;
-  const navItems=[
-    {sec:"Overview"},{id:"dashboard",icon:"📊",label:"Dashboard"},
-    {sec:"Inventory"},{id:"inventory",icon:"📦",label:"Products"},{id:"shelflife",icon:"🕐",label:"Shelf Life",badge:expSoon().length},{id:"pattri",icon:"⚖",label:"Pattri"},{id:"packets",icon:"🗂",label:"Packets"},{id:"boxinv",icon:"🗃",label:"Boxes"},
-    {sec:"Operations"},{id:"procurement",icon:"🛒",label:"Procurement"},{id:"orders",icon:"📋",label:"Orders",badge:pend},{id:"movements",icon:"🔄",label:"Stock Log"},
-    {sec:"Masters"},{id:"vendors",icon:"🏭",label:"Vendors"},{id:"customers",icon:"👥",label:"Customers"},
-    {sec:"Intelligence"},{id:"ai",icon:"🤖",label:"AI Predict"},{id:"reports",icon:"📈",label:"Reports"},
-    {sec:"Tools"},{id:"lots",icon:"🏷",label:"Lot Tracking"},{id:"boxcalc",icon:"📦",label:"Box Calc"},{id:"alerts",icon:"⚠",label:"Alerts",badge:lows+exps+pktLows},
-    {sec:"Audit"},{id:"history",icon:"🕵",label:"Activity History"},{id:"team",icon:"👥",label:"Team Access"},{id:"backup",icon:"💾",label:"Backup & Restore"},
+  const groups=[
+    {sec:"Overview",id:"grp-overview",items:[
+      {id:"dashboard",icon:"📊",label:"Dashboard"}
+    ]},
+    {sec:"Inventory",id:"grp-inv",items:[
+      {id:"inventory",icon:"📦",label:"Products"},
+      {id:"shelflife",icon:"🕐",label:"Shelf Life",badge:expSoon().length},
+      {id:"pattri",icon:"⚖",label:"Pattri"},
+      {id:"packets",icon:"🗂",label:"Packets"},
+      {id:"boxinv",icon:"🗃",label:"Boxes"},
+    ]},
+    {sec:"Operations",id:"grp-ops",items:[
+      {id:"procurement",icon:"🛒",label:"Procurement"},
+      {id:"orders",icon:"📋",label:"Orders",badge:pend},
+      {id:"movements",icon:"🔄",label:"Stock Log"},
+    ]},
+    {sec:"Masters",id:"grp-masters",items:[
+      {id:"vendors",icon:"🏭",label:"Vendors"},
+      {id:"customers",icon:"👥",label:"Customers"},
+    ]},
+    {sec:"Intelligence",id:"grp-intel",items:[
+      {id:"ai",icon:"🤖",label:"AI Predict"},
+      {id:"reports",icon:"📈",label:"Reports"},
+    ]},
+    {sec:"Tools",id:"grp-tools",items:[
+      {id:"lots",icon:"🏷",label:"Lot Tracking"},
+      {id:"boxcalc",icon:"📦",label:"Box Calc"},
+      {id:"alerts",icon:"⚠",label:"Alerts",badge:lows+exps+pktLows},
+    ]},
+    {sec:"Audit",id:"grp-audit",items:[
+      {id:"history",icon:"🕵",label:"Activity History"},
+      {id:"team",icon:"👥",label:"Team Access"},
+      {id:"backup",icon:"💾",label:"Backup & Restore"},
+    ]},
   ];
-  document.getElementById("nav-el").innerHTML=navItems.map(n=>{
-    if(n.sec)return`<div class="nav-sec">${n.sec}</div>`;
-    const on=TAB===n.id?" on":"";
-    const badge=n.badge>0?`<span class="nav-badge">${n.badge}</span>`:"";
-    return`<button class="nav-btn${on}" data-tab="${n.id}"><span class="nav-icon">${n.icon}</span><span>${n.label}</span>${badge}</button>`;
-  }).join("");
+  // Restore collapsed state from sessionStorage
+  if(!window._navCollapsed){
+    window._navCollapsed={};
+    try{var s=JSON.parse(sessionStorage.getItem("finest_nav_col")||"{}");window._navCollapsed=s;}catch(e){}
+  }
+  var html="";
+  groups.forEach(function(grp){
+    var isCollapsed=window._navCollapsed[grp.id]===true;
+    // Auto-expand group that contains active tab
+    if(grp.items.some(function(it){return it.id===TAB;}))isCollapsed=false;
+    var grpBadge=grp.items.reduce(function(a,it){return a+(it.badge||0);},0);
+    var badgeHtml=grpBadge>0?'<span class="nav-badge" style="margin-right:4px">'+grpBadge+'</span>':'';
+    var arrowCls=isCollapsed?' collapsed':'';
+    html+='<div class="nav-sec" onclick="toggleNavGroup(\''+grp.id+'\')">';
+    html+=grp.sec+badgeHtml;
+    html+='<span class="nav-sec-arrow'+arrowCls+'">▼</span></div>';
+    html+='<div class="nav-group" id="'+grp.id+'"'+(isCollapsed?' style="max-height:0"':' style="max-height:400px"')+'>';
+    grp.items.forEach(function(n){
+      var on=TAB===n.id?" on":"";
+      var badge=n.badge>0?'<span class="nav-badge">'+n.badge+'</span>':"";
+      html+='<button class="nav-btn'+on+'" data-tab="'+n.id+'"><span class="nav-icon">'+n.icon+'</span><span>'+n.label+'</span>'+badge+'</button>';
+    });
+    html+='</div>';
+  });
+  document.getElementById("nav-el").innerHTML=html;
+}
+
+function collapseAllNav(){
+  if(!window._navCollapsed)window._navCollapsed={};
+  ["grp-overview","grp-inv","grp-ops","grp-masters","grp-intel","grp-tools","grp-audit"].forEach(function(id){
+    window._navCollapsed[id]=true;
+    var el=document.getElementById(id);
+    if(el){el.style.maxHeight="0";}
+    var arrow=el&&el.previousElementSibling?el.previousElementSibling.querySelector(".nav-sec-arrow"):null;
+    if(arrow)arrow.classList.add("collapsed");
+  });
+  try{sessionStorage.setItem("finest_nav_col",JSON.stringify(window._navCollapsed));}catch(e){}
+}
+function expandAllNav(){
+  if(!window._navCollapsed)window._navCollapsed={};
+  ["grp-overview","grp-inv","grp-ops","grp-masters","grp-intel","grp-tools","grp-audit"].forEach(function(id){
+    window._navCollapsed[id]=false;
+    var el=document.getElementById(id);
+    if(el){el.style.maxHeight="400px";}
+    var arrow=el&&el.previousElementSibling?el.previousElementSibling.querySelector(".nav-sec-arrow"):null;
+    if(arrow)arrow.classList.remove("collapsed");
+  });
+  try{sessionStorage.setItem("finest_nav_col",JSON.stringify(window._navCollapsed));}catch(e){}
+}
+function toggleNavGroup(grpId){
+  if(!window._navCollapsed)window._navCollapsed={};
+  var el=document.getElementById(grpId);
+  var arrow=el?el.previousElementSibling.querySelector('.nav-sec-arrow'):null;
+  if(!el)return;
+  var isNowCollapsed=!window._navCollapsed[grpId];
+  window._navCollapsed[grpId]=isNowCollapsed;
+  try{sessionStorage.setItem("finest_nav_col",JSON.stringify(window._navCollapsed));}catch(e){}
+  if(isNowCollapsed){el.style.maxHeight="0";}
+  else{el.style.maxHeight="400px";}
+  if(arrow)arrow.classList.toggle("collapsed",isNowCollapsed);
 }
 
 // ══════════════════════════════════════════════
@@ -894,12 +983,21 @@ function pInv(){
 // ─── SHELF LIFE ───────────────────────────────
 function pShelfLife(){
   const q=(FV.slf||"").toLowerCase(),f=FV["slf-f"]||"all";
-  let rows=S.inv.filter(r=>!r._slfHidden&&(!q||r.name.toLowerCase().includes(q)||r.lot.toLowerCase().includes(q)));
+  const prodFilter=FV["slf-prod"]||"";
+  const sortBy=FV["slf-sort"]||"exp";
+  let rows=S.inv.filter(r=>{
+    if(r._slfHidden)return false;
+    if(q&&!r.name.toLowerCase().includes(q)&&!r.lot.toLowerCase().includes(q))return false;
+    if(prodFilter&&r.name!==prodFilter)return false;
+    return true;
+  });
   if(f==="critical")rows=rows.filter(r=>{const d=daysLeft(r.exp);return d!==null&&d<=14;});
   else if(f==="warning")rows=rows.filter(r=>{const d=daysLeft(r.exp);return d!==null&&d>14&&d<=CFG.warnDays;});
   else if(f==="expired")rows=rows.filter(r=>{const d=daysLeft(r.exp);return d!==null&&d<0;});
   else if(f==="good")rows=rows.filter(r=>{const d=daysLeft(r.exp);return d===null||d>CFG.warnDays;});
-  rows=rows.sort((a,b)=>(daysLeft(a.exp)!==null?daysLeft(a.exp):9999)-(daysLeft(b.exp)!==null?daysLeft(b.exp):9999));
+  if(sortBy==="name")rows=rows.sort((a,b)=>a.name.localeCompare(b.name));
+  else if(sortBy==="pct")rows=rows.sort((a,b)=>slfPct(b.mfd,b.exp)-slfPct(a.mfd,a.exp));
+  else rows=rows.sort((a,b)=>(daysLeft(a.exp)!==null?daysLeft(a.exp):9999)-(daysLeft(b.exp)!==null?daysLeft(b.exp):9999));
   return`
   <div style="background:var(--S);border:1px solid var(--bd);border-radius:var(--RL);padding:13px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
     <div><div style="font-size:13px;font-weight:500">Warning threshold</div><div style="font-size:11px;color:var(--hx)">Alert when shelf life is below N days</div></div>
@@ -907,12 +1005,21 @@ function pShelfLife(){
   </div>
   <div class="frow">
     <input class="si" placeholder="🔍 Search…" value="${FV.slf||""}" data-filter="slf">
-    <select class="si" data-filter="slf-f" style="width:140px">
+    <select class="si" data-filter="slf-f" style="width:145px">
       <option value="all" ${f==="all"?"selected":""}>All products</option>
       <option value="critical" ${f==="critical"?"selected":""}>🔴 Critical (≤14d)</option>
       <option value="warning" ${f==="warning"?"selected":""}>🟡 Warning</option>
       <option value="expired" ${f==="expired"?"selected":""}>💀 Expired</option>
       <option value="good" ${f==="good"?"selected":""}>🟢 Good</option>
+    </select>
+    <select class="si" data-filter="slf-prod" style="width:170px">
+      <option value="">All products</option>
+      ${[...new Set(S.inv.map(r=>r.name))].sort().map(n=>`<option value="${n}" ${(FV["slf-prod"]||"")===n?"selected":""}>${n}</option>`).join("")}
+    </select>
+    <select class="si" data-filter="slf-sort" style="width:130px">
+      <option value="exp" ${(FV["slf-sort"]||"exp")==="exp"?"selected":""}>Sort: Expiry ↑</option>
+      <option value="name" ${(FV["slf-sort"]||"")==="name"?"selected":""}>Sort: Name</option>
+      <option value="pct" ${(FV["slf-sort"]||"")==="pct"?"selected":""}>Sort: Used %</option>
     </select>
   </div>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;">
@@ -946,10 +1053,14 @@ function pShelfLife(){
           ${lpct>0?`<div class="pbar" style="height:5px"><div class="pfill" style="width:${lpct}%;background:${lcol}"></div></div>`:""}
         </div>`;
       }).join("");
+      // Simple lot count badge
+      const lotCountBadge=allLots.length>1?('<div style="margin-top:4px;font-size:11px;color:var(--hx)">'+allLots.length+' lots in tracking</div>'):'';
       return`<div class="card" style="border-left:3px solid ${col}">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
           <div style="flex:1"><div style="font-weight:600;font-size:13.5px">${r.name}</div>
-          <div style="font-size:11px;color:var(--at);font-family:'DM Mono',monospace;margin-top:2px">${r.lot} ✓ current · ${N(r.qty)} ${r.unit}</div></div>
+          <div style="font-size:11px;color:var(--at);font-family:'DM Mono',monospace;margin-top:2px">${r.lot} ✓ current · ${N(r.qty)} ${r.unit}</div>
+          ${lotCountBadge}
+          </div>
           <div style="display:flex;align-items:center;gap:5px">
             ${slfBadge(dl)}
             <button class="btn xs" onclick="editProductShelfLife(${S.inv.indexOf(r)})" title="Edit MFD/Expiry dates">✏</button>
@@ -964,141 +1075,23 @@ function pShelfLife(){
         <div class="pbar" style="height:8px;margin-bottom:5px"><div class="pfill" style="width:${pct}%;background:${col}"></div></div>
         <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--hx);margin-bottom:${otherLots?"8px":"0"}"><span>${r.mfd?fd(r.mfd):"MFD?"}</span><span style="color:${col};font-weight:500">${dl===null?"—":dl<0?"EXPIRED":dl+" days left"}</span><span>${r.exp?fd(r.exp):"EXP?"}</span></div>
         ${otherLots?`<div style="font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px">Other Lots</div>${otherLots}`:""}
+        <div class="slf-lot-info"></div>
       </div>`;
     }).join(""):`<div style="color:var(--hx);padding:40px;text-align:center;grid-column:1/-1">No products match this filter.</div>`}
-  </div>`;
-}
-
-// ─── PACKET INVENTORY ─────────────────────────
-function pPkt(){
-  const q=(FV.pkt||"").toLowerCase(),tp=FV["pkt-tp"]||"";
-  const rows=S.pkt.filter(r=>(!q||[r.name,r.type].join(" ").toLowerCase().includes(q))&&(!tp||r.type===tp));
-  return`
-  <div class="frow">
-    <input class="si" placeholder="🔍 Search packets…" value="${FV.pkt||""}" data-filter="pkt">
-    <select class="si" data-filter="pkt-tp" style="width:150px">
-      <option value="">All types</option>
-      ${[...new Set(S.pkt.map(p=>p.type).filter(Boolean))].sort().map(t=>`<option value="${t}" ${tp===t?"selected":""}>${t}</option>`).join("")}
-    </select>
-    <div class="ml btn-group">
-      <button class="btn sm" data-action="export-pkt">⬇ Export</button>
-      <button class="btn sm te" data-action="import-pkt">⬆ Import</button>
-      <button class="btn sm pr" data-action="open-pkt">+ Add Packets</button>
-    </div>
   </div>
-  <div class="tw"><table><thead><tr><th>#</th><th>Product / Vendor</th><th>Pack Type</th><th>Qty</th><th>Unit</th><th>Wt/Packet</th><th>Actions</th></tr></thead><tbody>
-  ${rows.length?rows.map((r,i)=>`<tr class="dr">
-    <td class="d">${i+1}</td><td><strong>${r.name}</strong></td>
-    <td>${pktTypeBadge(r.type)}</td>
-    <td><strong>${N(r.qty)}</strong></td><td class="d">${r.unit}</td>
-    <td class="d">${r.wtPerPkt?N(r.wtPerPkt)+" kg":"—"}</td>
-    <td><div class="act">
-      <button class="btn xs" data-action="edit-pkt" data-i="${S.pkt.indexOf(r)}">✏</button>
-      <button class="btn xs dn" data-action="del-pkt" data-i="${S.pkt.indexOf(r)}">🗑</button>
-    </div></td>
-  </tr>`).join(""):`<tr class="empty"><td colspan="7">No packets found</td></tr>`}
-  </tbody></table></div>`;
-}
-
-// ─── PROCUREMENT ──────────────────────────────
-function pProc(){
-  const q=(FV.proc||"").toLowerCase(),st=FV["proc-st"]||"";
-  const rows=S.proc.filter(r=>(!q||[r.po,r.vendor,r.status,r.flag].join(" ").toLowerCase().includes(q))&&(!st||r.status.toLowerCase().includes(st)||r.flag.toLowerCase().includes(st)));
-  const unpaid=S.proc.filter(p=>p.status==="RECEIVED"&&!p.paid).length;
-  return`
-  ${unpaid?`<div class="abar amber">💰 ${unpaid} received PO(s) are unpaid — review payment status.</div>`:""}
-  <div class="frow">
-    <input class="si" placeholder="🔍 Search vendor or PO…" value="${FV.proc||""}" data-filter="proc">
-    <select class="si" data-filter="proc-st" style="width:130px"><option value="">All status</option><option value="received">Received</option><option value="process">In Process</option><option value="delayed">Delayed</option></select>
-    <div class="ml btn-group">
-      <button class="btn sm" data-action="export-proc">⬇ Export</button>
-      <button class="btn sm te" data-action="import-proc">⬆ Import</button>
-      <button class="btn sm pr" data-action="open-proc">+ Add PO</button>
-    </div>
-  </div>
-  <div class="tw"><table><thead><tr><th>PO No.</th><th>Vendor</th><th>Qty</th><th>PO Open</th><th>PO Expiry</th><th>PO Date</th><th>Due</th><th>GRN</th><th>From</th><th>To</th><th>Agent</th><th>Agent Ph.</th><th>Aging</th><th>Status</th><th>Flag</th><th>Paid</th><th>Notes</th><th>Actions</th></tr></thead><tbody>
-  ${rows.length?rows.map(r=>`<tr class="dr">
-    <td class="mo" style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.po}</td>
-    <td><strong>${r.vendor}</strong></td><td>${r.qty}</td>
-    <td class="d">${fd(r.poOpen||"—")}</td><td class="d">${fd(r.poExpiry||"—")}</td>
-    <td class="d">${fd(r.poDate)}</td><td class="d">${fd(r.due)}</td><td class="d">${fd(r.grn)}</td>
-    <td class="d" style="white-space:nowrap">${r.fromPlace||"—"}</td>
-    <td class="d" style="white-space:nowrap">${r.toPlace||"—"}</td>
-    <td class="d" style="white-space:nowrap">${r.agentName||"—"}</td>
-    <td class="d"><a href="tel:${r.agentPhone||""}" style="color:var(--b2);text-decoration:none">${r.agentPhone||"—"}</a></td>
-    <td class="d">${r.aging}</td><td>${sbadge(r.status)}</td><td>${fbadge(r.flag)}</td>
-    <td>${r.paid?bx("g","Paid"):bx("r","Unpaid")}</td>
-    <td class="d" style="max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.notes||"—"}</td>
-    <td><div class="act">
-      ${r.status==="on process"?`<button class="btn xs gr" data-action="recv-proc" data-i="${S.proc.indexOf(r)}">✓ Recv</button>`:""}
-      <button class="btn xs" data-action="edit-proc" data-i="${S.proc.indexOf(r)}">✏</button>
-      <button class="btn xs dn" data-action="del-proc" data-i="${S.proc.indexOf(r)}">🗑</button>
-    </div></td>
-  </tr>`).join(""):`<tr class="empty"><td colspan="18">No records found</td></tr>`}
-  </tbody></table></div>`;
-}
-
-// ─── ORDERS ───────────────────────────────────
-function pOrders(){
-  const q=(FV.ord||"").toLowerCase(),st=FV["ord-st"]||"";
-  const rows=S.ord.filter(r=>(!q||[r.id,r.customer,r.product,r.status].join(" ").toLowerCase().includes(q))&&(!st||r.status===st));
-  const totalVal=S.ord.filter(o=>o.status!=="cancelled").reduce((a,o)=>a+(o.value||0),0);
-  return`
-  ${totalVal>0?`<div class="abar blue">💰 Total order value: <strong>${CFG.currency}${N(totalVal)}</strong> (excluding cancelled orders)</div>`:""}
-  <div class="frow">
-    <input class="si" placeholder="🔍 Search order or customer…" value="${FV.ord||""}" data-filter="ord">
-    <select class="si" data-filter="ord-st" style="width:130px"><option value="">All status</option><option value="pending">Pending</option><option value="fulfilled">Fulfilled</option><option value="dispatched">Dispatched</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select>
-    <div class="ml btn-group">
-      <button class="btn sm" data-action="export-ord">⬇ Export</button>
-      <button class="btn sm te" data-action="import-ord">⬆ Import</button>
-      <button class="btn sm pr" data-action="open-order">+ New Order</button>
-        <button class="btn sm pu" data-action="open-bulk-order">⚡ Bulk Order</button>
-    </div>
-  </div>
-  <div class="tw"><table><thead><tr><th>Order ID</th><th>Customer</th><th>Items</th><th>Total Qty</th><th>Total Value</th><th>Box</th><th>Date</th><th>Status</th><th>Delivery</th><th>Actions</th></tr></thead><tbody>
-  ${rows.length?rows.map(r=>`<tr class="dr">
-    <td class="mo">${r.id}</td>
-    <td><strong>${r.customer}</strong></td>
-    <td>${r.items?bx("b",r.items.length+" items"):bx(r.orderType==="packet"?"b":"g",r.product||(r.orderType||"product"))}</td>
-    <td><strong>${N(r.qty)}</strong> ${r.unit}</td>
-    <td class="d">${r.value?CFG.currency+N(r.value):"—"}</td>
-    <td class="d">${r.boxType?r.boxType+" ×"+r.boxQty:"—"}</td>
-    <td class="d">${fd(r.date)}</td>
-    <td>${sbadge(r.status)}</td>
-    <td>${sbadge(r.delivery||"—")}</td>
-    <td><div class="act">
-      ${r.status==="pending"?`<button class="btn xs gr" data-action="fulfill-ord" data-i="${S.ord.indexOf(r)}">✓</button>`:""}
-      ${r.status==="fulfilled"?`<button class="btn xs te" data-action="dispatch-ord" data-i="${S.ord.indexOf(r)}">🚚</button>`:""}
-      <button class="btn xs" data-action="invoice-ord" data-i="${S.ord.indexOf(r)}">🧾</button>
-      <button class="btn xs" data-action="edit-ord" data-i="${S.ord.indexOf(r)}">✏</button>
-      <button class="btn xs dn" data-action="cancel-ord" data-i="${S.ord.indexOf(r)}">✕</button>
-    </div></td>
-  </tr>`).join(""):`<tr class="empty"><td colspan="12">No orders yet — click "+ New Order".</td></tr>`}
-  </tbody></table></div>`;
-}
-
-// ─── STOCK MOVEMENTS ──────────────────────────
-function pMovements(){
-  const q=(FV.mov||"").toLowerCase(),t=FV["mov-t"]||"";
-  const rows=S.movements.filter(m=>(!q||[m.product,m.ref,m.note].join(" ").toLowerCase().includes(q))&&(!t||m.type===t));
-  return`
-  <div class="frow">
-    <input class="si" placeholder="🔍 Search product or reference…" value="${FV.mov||""}" data-filter="mov">
-    <select class="si" data-filter="mov-t" style="width:120px"><option value="">All types</option><option value="in">Stock In</option><option value="out">Stock Out</option><option value="adj">Adjustment</option></select>
-    <button class="btn sm ml" data-action="export-mov">⬇ Export</button>
-  </div>
-  <div style="display:flex;flex-direction:column;">
-    ${rows.length?rows.slice(0,100).map(m=>`
-    <div class="mov-item">
-      <div class="mov-icon ${m.type==="in"?"mov-in":m.type==="out"?"mov-out":"mov-adj"}">${m.type==="in"?"↑":m.type==="out"?"↓":"↔"}</div>
-      <div style="flex:1;min-width:0">
-        <div class="mov-title">${m.product}</div>
-        <div class="mov-meta">${m.ref||"—"} · ${fd(m.date)} · ${m.note||""}</div>
-      </div>
-      <div class="mov-qty ${m.type==="in"?"in":m.type==="out"?"out":""}">${m.type==="in"?"+":m.type==="out"?"-":"±"}${N(m.qty)} ${m.unit}</div>
-    </div>`).join(""):`<div style="color:var(--hx);text-align:center;padding:40px">No stock movements recorded yet.</div>`}
-    ${rows.length>100?`<div style="text-align:center;padding:12px;color:var(--hx);font-size:12px">Showing last 100 movements</div>`:""}
-  </div>`;
+  ${(function(){
+    if(f!=="all"||!S.inv.filter(r=>!r._slfHidden&&!r.mfd&&!r.exp&&(prodFilter?r.name===prodFilter:true)).length)return"";
+    var wd=S.inv.filter(r=>!r._slfHidden&&!r.mfd&&!r.exp&&(prodFilter?r.name===prodFilter:true));
+    return'<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bd)">'
+      +'<div style="font-size:11px;color:var(--hx);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Products without shelf life dates ('+wd.length+')</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;">'
+      +wd.map(function(w){return'<div class="card" style="border-left:3px solid var(--bd2);display:flex;align-items:center;justify-content:space-between;padding:10px 14px">'
+        +'<div><div style="font-size:13px;font-weight:500">'+w.name+'</div>'
+        +'<div style="font-size:11px;color:var(--hx);font-family:monospace">'+w.lot+' \xb7 '+N(w.qty)+' '+w.unit+'</div></div>'
+        +'<button class="btn xs pr" onclick="editProductShelfLife('+S.inv.indexOf(w)+')">+ Add Dates</button></div>';}).join("")
+      +'</div></div>';
+  })()}
+  `;
 }
 
 // ─── VENDORS ──────────────────────────────────
@@ -1316,6 +1309,8 @@ function pLots(){
           </span>
         </span>
         ${(ld.mfd||ld.exp)?`<span style="font-size:9px;color:var(--hx);width:100%">${ld.mfd?fd(ld.mfd):"MFD?"} → <span style="color:${dlCol}">${ld.exp?fd(ld.exp):"EXP?"}${dlTxt}</span></span>`:""}
+        ${(ld.qty||ld.receivedQty)?`<span style="font-size:9px;color:var(--g2);width:100%">⬇ ${N(ld.qty||ld.receivedQty)} ${ld.unit||ld.receivedUnit||"kg"}</span>`:""}
+        ${ld.receivedQty?`<span style="font-size:9px;color:var(--g2);width:100%">⬇ Recv: ${N(ld.receivedQty)} ${ld.receivedUnit||""}</span>`:""}
       </span>`;}).join("")}
     </div>
     <div class="lot-add" id="la-${li}">
@@ -1323,6 +1318,14 @@ function pLots(){
         <div class="fg" style="margin:0"><label class="fl">Lot Code *</label><input class="fi" id="lc-${li}" placeholder="e.g. J260412" style="font-family:'DM Mono',monospace;font-size:12px"></div>
         <div class="fg" style="margin:0"><label class="fl">MFD Date</label><input class="fi" id="la-mfd-${li}" type="date" style="font-size:12px"></div>
         <div class="fg" style="margin:0"><label class="fl">Expiry Date</label><input class="fi" id="la-exp-${li}" type="date" style="font-size:12px"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+        <div class="fg" style="margin:0"><label class="fl">Received Qty (weight/pieces)</label><input class="fi" id="la-qty-${li}" type="number" min="0" step="0.001" placeholder="0" style="font-size:12px"></div>
+        <div class="fg" style="margin:0"><label class="fl">Unit</label><select class="fi" id="la-unit-${li}" style="font-size:12px;padding:6px 8px"><option value="kg">kg</option><option value="pcs">pcs</option><option value="gm">gm</option><option value="litre">litre</option><option value="box">box</option></select></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+        <div class="fg" style="margin:0"><label class="fl">Received Qty (weight/pieces)</label><input class="fi" id="la-qty-${li}" type="number" min="0" step="0.001" placeholder="0" style="font-size:12px"></div>
+        <div class="fg" style="margin:0"><label class="fl">Unit</label><select class="fi" id="la-qunit-${li}" style="font-size:12px;padding:6px 8px"><option value="kg">kg</option><option value="pcs">pcs</option><option value="gm">gm</option><option value="litre">litre</option><option value="box">box</option></select></div>
       </div>
       <div style="display:flex;gap:5px">
         <select class="fi" id="la-set-${li}" style="width:auto;font-size:12px;padding:6px 8px">
@@ -1391,14 +1394,12 @@ function saveEditLotCode(li,ti){
   l.lotDates[newCode]={mfd:mfd||"",exp:exp||""};
   l.lots[ti]=newCode;
   if(l.current===oldCode||setCur)l.current=newCode;
-  // Feature 3: if this is the current lot, sync MFD/Expiry to inventory product
-  if(l.current===newCode&&(mfd||exp)){
-    var invProd=S.inv.find(function(p){return p.name===l.name;});
-    if(invProd){
-      if(mfd)invProd.mfd=mfd;
-      if(exp)invProd.exp=exp;
-      if(newCode)invProd.lot=newCode;
-    }
+  // Interlink: if this is the current lot, sync MFD/Expiry + lot code to inventory
+  var invProdSync=S.inv.find(function(p){return p.name===l.name;});
+  if(invProdSync&&(l.current===newCode||setCur)){
+    if(mfd)invProdSync.mfd=mfd;
+    if(exp)invProdSync.exp=exp;
+    invProdSync.lot=newCode;
   }
   logHistory("edit_lot",l.name,"lot "+oldCode+"→"+newCode+(mfd?", mfd="+mfd:"")+(exp?", exp="+exp:"")+(setCur?" (current)":""));
   closeM();schedSave();render();toast("Lot updated ✓","ok");
@@ -1417,8 +1418,17 @@ function removeLotCode(li,ti){
 
 function setCurrentLot(li,code){
   var l=S.lot[li];if(!l)return;
+  _pushUndo("Set current lot",["lot","inv"]);
   l.current=code;
-  logHistory("set_current_lot",l.name,"current lot → "+code);
+  // Interlink: sync current lot's dates to inventory product
+  var invProd=S.inv.find(function(p){return p.name===l.name;});
+  if(invProd){
+    invProd.lot=code;
+    var ld=(l.lotDates&&l.lotDates[code])||{};
+    if(ld.mfd)invProd.mfd=ld.mfd;
+    if(ld.exp)invProd.exp=ld.exp;
+  }
+  logHistory("set_current_lot",l.name,"current lot → "+code+(invProd?" (dates synced to inventory)":""));
   schedSave();render();toast(code+" set as current lot ✓","ok");
 }
 
@@ -2005,11 +2015,25 @@ function handleClick(e){
     case"invoice-ord":openInvoiceModal(+el.dataset.i);break;
     case"open-vendor":openVendorModal(null);break;
     case"edit-vendor":openVendorModal(+el.dataset.i);break;
-    case"del-vendor":if(confirm("Delete vendor?")){_pushUndo("Delete vendor",["vendors"]);S.vendors.splice(+el.dataset.i,1);schedSave();render();toast("Deleted — press ↩ Undo to restore","info");}break;
+    case"del-vendor":if(confirm("Delete vendor?")){
+      _pushUndo("Delete vendor",["vendors","proc"]);
+      var dv=S.vendors[+el.dataset.i];
+      S.vendors.splice(+el.dataset.i,1);
+      // Interlink: note vendor removal in related POs
+      if(dv)S.proc.forEach(function(p){if(p.vendor===dv.name&&p.status==="on process")p.notes=(p.notes?p.notes+"; ":"")+"[Vendor deleted]";});
+      schedSave();render();toast("Vendor deleted — press ↩ Undo to restore","info");
+    }break;
     case"save-vendor":saveVendor(el.dataset.i===""?null:+el.dataset.i);break;
     case"open-customer":openCustomerModal(null);break;
     case"edit-customer":openCustomerModal(+el.dataset.i);break;
-    case"del-customer":if(confirm("Delete customer?")){_pushUndo("Delete customer",["customers"]);S.customers.splice(+el.dataset.i,1);schedSave();render();toast("Deleted — press ↩ Undo to restore","info");}break;
+    case"del-customer":if(confirm("Delete customer?")){
+      _pushUndo("Delete customer",["customers","ord"]);
+      var dc=S.customers[+el.dataset.i];
+      S.customers.splice(+el.dataset.i,1);
+      // Interlink: note customer removal in pending orders
+      if(dc)S.ord.forEach(function(o){if(o.customer===dc.name&&o.status==="pending")o.notes=(o.notes?o.notes+"; ":"")+"[Customer deleted]";});
+      schedSave();render();toast("Customer deleted — press ↩ Undo to restore","info");
+    }break;
     case"save-customer":saveCustomer(el.dataset.i===""?null:+el.dataset.i);break;
     case"cust-history":openCustHistModal(+el.dataset.i);break;
     case"open-lot":openLotModal();break;
@@ -2104,7 +2128,24 @@ function saveInv(idx){
   if(!r.name||!r.lot){toast("Product name and lot required","warn");return;}
   if(idx==null){S.inv.push(r);logMove("in",r.name,r.qty,r.unit,"New Stock Entry","Added to inventory");}
   else{const diff=r.qty-prevQty;if(diff!==0)logMove(diff>0?"in":"adj",r.name,Math.abs(diff),r.unit,"Stock Update","Manual update");S.inv[idx]=r;}
+  // Interlink: if product name changed, sync across lot and pattri
+  var oldInvName=idx!=null&&S.inv[idx]?S.inv[idx].name:"";
   logHistory(idx==null?"add_product":"edit_product",r.name,"qty="+N(r.qty)+" "+r.unit+", lot="+r.lot+(r.exp?", exp="+fd(r.exp):""));
+  if(idx!=null&&oldInvName&&oldInvName!==r.name){
+    // Update lot group name
+    var lotGrpChg=S.lot.find(function(l){return l.name===oldInvName;});
+    if(lotGrpChg)lotGrpChg.name=r.name;
+    // Update pattri name
+    var pattriChg=S.pattri.find(function(p){return p.name===oldInvName;});
+    if(pattriChg)pattriChg.name=r.name;
+    // Update order items referencing old name
+    S.ord.forEach(function(o){
+      if(o.product===oldInvName)o.product=r.name;
+      if(o.items)o.items.forEach(function(it){if(it.product===oldInvName)it.product=r.name;});
+    });
+    // Update movements
+    S.movements.forEach(function(m){if(m.product===oldInvName)m.product=r.name;});
+  }
   // Interlink: if new product, create lot group. If lot matches existing lot group, sync dates.
   if(idx==null){
     // Add to lot tracking if not already there
@@ -2142,6 +2183,14 @@ function doAdjust(idx){
   logMove(movType,r.name,q,r.unit,"Manual Adjustment",note||t);
   logHistory("adjust_product",r.name,t+": "+N(q)+" "+r.unit+" → total "+N(newQty)+(note?" ("+note+")":""));
   S.inv[idx].qty=newQty;
+  // Interlink: update pattri net weight on manual adjust for kg products
+  if(r.unit==="kg"){
+    var ptAdj=S.pattri.find(function(p){return p.name===r.name;});
+    if(ptAdj){
+      var diff=newQty-r.qty;
+      ptAdj.netWeight=Math.max(0,Math.round(((ptAdj.netWeight||0)+diff)*1000)/1000);
+    }
+  }
   closeM();schedSave();render();toast("Stock adjusted: "+r.name+" → "+N(newQty)+" "+r.unit+" ✓","ok");
 }
 
@@ -2345,20 +2394,30 @@ function cancelOrder(i){
 
 
 function saveVendor(idx){
-  if(idx!=null)_pushUndo("Edit vendor",["vendors"]);
+  var oldName=idx!=null?S.vendors[idx].name:"";
+  if(idx!=null)_pushUndo("Edit vendor",["vendors","proc"]);
   const v={id:idx!=null?S.vendors[idx].id:"V"+uid(),name:gv("m-vname").trim(),contact:gv("m-vcontact").trim(),phone:gv("m-vphone").trim(),email:gv("m-vemail").trim(),city:gv("m-vcity").trim(),terms:gv("m-vterms").trim(),rating:parseInt(gv("m-vrating"))||0,notes:gv("m-vnotes").trim()};
   if(!v.name){toast("Vendor name required","warn");return;}
   if(idx==null)S.vendors.push(v);else S.vendors[idx]=v;
-  logHistory(idx==null?"add_vendor":"edit_vendor",v.name,"city="+v.city+", terms="+v.terms);
+  // Interlink: if renamed, update PO vendor references
+  if(idx!=null&&oldName&&oldName!==v.name){
+    S.proc.forEach(function(p){if(p.vendor===oldName)p.vendor=v.name;});
+  }
+  logHistory(idx==null?"add_vendor":"edit_vendor",v.name,"city="+v.city+", terms="+v.terms+(oldName&&oldName!==v.name?" (renamed from "+oldName+")":""));
   closeM();schedSave();render();toast(idx==null?"Vendor added ✓":"Vendor updated ✓","ok");
 }
 
 function saveCustomer(idx){
-  if(idx!=null)_pushUndo("Edit customer",["customers"]);
+  var oldName=idx!=null?S.customers[idx].name:"";
+  if(idx!=null)_pushUndo("Edit customer",["customers","ord"]);
   const c={id:idx!=null?S.customers[idx].id:"C"+uid(),name:gv("m-cname").trim(),contact:gv("m-ccontact").trim(),phone:gv("m-cphone").trim(),email:gv("m-cemail").trim(),city:gv("m-ccity").trim(),creditDays:parseInt(gv("m-ccredit"))||0,notes:gv("m-cnotes").trim()};
   if(!c.name){toast("Customer name required","warn");return;}
   if(idx==null)S.customers.push(c);else S.customers[idx]=c;
-  logHistory(idx==null?"add_customer":"edit_customer",c.name,"city="+c.city+", credit="+c.creditDays+"d");
+  // Interlink: if renamed, update order customer references
+  if(idx!=null&&oldName&&oldName!==c.name){
+    S.ord.forEach(function(o){if(o.customer===oldName)o.customer=c.name;});
+  }
+  logHistory(idx==null?"add_customer":"edit_customer",c.name,"city="+c.city+", credit="+c.creditDays+"d"+(oldName&&oldName!==c.name?" (renamed from "+oldName+")":""));
   closeM();schedSave();render();toast(idx==null?"Customer added ✓":"Customer updated ✓","ok");
 }
 
@@ -2392,17 +2451,26 @@ function addLotInline(li){
   _pushUndo("Add lot "+code,["lot","inv"]);
   S.lot[li].lots.push(code);
   if(!S.lot[li].lotDates)S.lot[li].lotDates={};
-  S.lot[li].lotDates[code]={mfd:mfd||"",exp:exp||""};
+  var initQty=parseFloat((document.getElementById("la-qty-"+li)||{value:0}).value)||0;
+  var initUnit=(document.getElementById("la-unit-"+li)||{value:""}).value||"kg";
+  S.lot[li].lotDates[code]={mfd:mfd||"",exp:exp||"",receivedQty:initQty||0,receivedUnit:initUnit||"",lastReceivedDate:window.today()};
   if(setCur){
     S.lot[li].current=code;
-    // Feature 3: sync dates to inventory product (current lot drives shelf life)
-    if(mfd||exp){
-      var invProd=S.inv.find(function(p){return p.name===S.lot[li].name;});
-      if(invProd){
-        if(mfd)invProd.mfd=mfd;
-        if(exp)invProd.exp=exp;
-        invProd.lot=code;
+    // Feature 3: sync dates and qty to inventory product
+    var invProd=S.inv.find(function(p){return p.name===S.lot[li].name;});
+    if(invProd){
+      if(mfd)invProd.mfd=mfd;
+      if(exp)invProd.exp=exp;
+      invProd.lot=code;
+      // If initial qty received, add to inventory
+      if(initQty>0&&invProd.unit===(initUnit||invProd.unit)){
+        invProd.qty=Math.round((invProd.qty+initQty)*1000)/1000;
+        logMove("in",invProd.name,initQty,initUnit||invProd.unit,"New Lot "+code,"Added with lot");
       }
+    } else if(initQty>0) {
+      // Create new inventory entry
+      S.inv.push({id:"P"+uid(),name:S.lot[li].name,lot:code,cat:"Product",qty:initQty,minQty:CFG.lowThresh,unit:initUnit||"kg",mfd:mfd||"",exp:exp||"",cost:0});
+      logMove("in",S.lot[li].name,initQty,initUnit||"kg","New Lot "+code,"New lot entry");
     }
   }
   logHistory("add_lot",S.lot[li].name,"lot="+code+(mfd?", mfd="+mfd:"")+(exp?", exp="+exp:"")+(setCur?" (current, dates synced)":""));
@@ -3641,24 +3709,48 @@ Be thorough — extract every product line item. If quantities or prices are mis
         : {type:"image",source:{type:"base64",media_type:mediaType,data:b64}}
     ];
 
+    // Note: requires anthropic-dangerous-direct-browser-access header for browser-side calls
+    // Try Anthropic API — works in claude.ai context; on external hosting shows manual entry
+    var apiHeaders={
+      "Content-Type":"application/json",
+      "anthropic-version":"2023-06-01",
+      "anthropic-dangerous-direct-browser-access":"true"
+    };
     fetch("https://api.anthropic.com/v1/messages",{
       method:"POST",
-      headers:{"Content-Type":"application/json"},
+      headers:apiHeaders,
       body:JSON.stringify({
         model:"claude-sonnet-4-20250514",
         max_tokens:2000,
         messages:[{role:"user",content:msgContent}]
       })
-    }).then(function(r){return r.json();}).then(function(data){
+    }).then(function(r){
+      if(!r.ok)return r.json().then(function(e){throw new Error((e.error&&e.error.message)||r.status);});
+      return r.json();
+    }).then(function(data){
       var text=(data.content&&data.content[0]&&data.content[0].text)||"";
+      text=text.replace(/```json|```/g,"").trim();
       var m=text.match(/\{[\s\S]*\}/);
-      if(!m){res.innerHTML='<div class="abar red">⚠ Could not extract data. Make sure the PDF is clear and readable.</div>';return;}
-      var ext=JSON.parse(m[0]);
-      window._pdfExtracted=ext;
-      showPDFExtracted(ext);
-      if(btn)btn.style.display="inline-flex";
+      if(!m){res.innerHTML='<div class="abar red">⚠ Could not extract data. Try a clearer image or use Manual Entry below.</div>'+showManualEntryForm();return;}
+      try{
+        var ext=JSON.parse(m[0]);
+        window._pdfExtracted=ext;
+        showPDFExtracted(ext);
+        if(btn)btn.style.display="inline-flex";
+      }catch(pe){res.innerHTML='<div class="abar red">⚠ Parse error: '+pe.message+'</div>'+showManualEntryForm();}
     }).catch(function(e){
-      res.innerHTML='<div class="abar red">⚠ AI error: '+e.message+'</div>';
+      var msg=e.message||String(e)||"unknown error";
+      var isNetwork=msg.toLowerCase().includes("fetch")||msg.toLowerCase().includes("network")||msg.toLowerCase().includes("failed")||msg.toLowerCase().includes("cors");
+      res.innerHTML='<div class="abar amber" style="margin-bottom:8px">'
+        +(isNetwork
+          ?'📡 <strong>Direct AI access blocked by browser security (CORS).</strong><br>'
+           +'<span style="font-size:12px">This is a browser security restriction — the Anthropic API cannot be called directly from an external website.<br>'
+           +'<strong>Solutions:</strong> (1) Use the Manual Entry form below to enter invoice data, or (2) Open this app in the Claude.ai environment.</span>'
+          :'⚠ AI error: '+msg+'.<br>Use Manual Entry below to enter data manually.')
+        +'</div>'
+        +'<div style="font-size:11px;color:var(--hx);padding:6px 0">Error details: '+msg+'</div>'
+        +showManualEntryForm();
+      if(btn)btn.style.display="none";
     });
   };
   reader.readAsDataURL(file);
@@ -3975,25 +4067,43 @@ function importJSONBackup(){
 // ─── LOT: RECEIVE STOCK (updates product + lot) ──────────────
 function openRecvLotStockModal(li){
   var l=S.lot[li];if(!l)return;
-  var lotOpts=l.lots.map(function(t,i){return'<option value="'+t+'" '+(t===l.current?'selected':'')+'>'+t+(t===l.current?' (current)':'')+'</option>';}).join("");
+  // Auto-detect unit from existing inventory product
+  var invProd=S.inv.find(function(p){return p.name===l.name;});
+  var defaultUnit=invProd?invProd.unit:"kg";
+  var currentStock=invProd?N(invProd.qty)+" "+invProd.unit:"—";
+  var lotOpts=l.lots.map(function(t){
+    var ld=(l.lotDates&&l.lotDates[t])||{};
+    var ldl=ld.exp?daysLeft(ld.exp):null;
+    var dlText=ldl!==null?(ldl<0?" (EXPIRED)":ldl<=30?" ("+ldl+"d left)":""):"";
+    return'<option value="'+t+'" '+(t===l.current?'selected':'')+'>'+t+(t===l.current?' ✓ current':'')+dlText+'</option>';
+  }).join("");
+  var unitSel='<option value="kg" '+(defaultUnit==="kg"?"selected":"")+'>kg (weight)</option>'
+    +'<option value="pcs" '+(defaultUnit==="pcs"?"selected":"")+'>pcs (pieces)</option>'
+    +'<option value="gm" '+(defaultUnit==="gm"?"selected":"")+'>gm (grams)</option>'
+    +'<option value="litre" '+(defaultUnit==="litre"?"selected":"")+'>litre</option>'
+    +'<option value="box" '+(defaultUnit==="box"?"selected":"")+'>box</option>';
   openM('<div class="modal wd">'
     +'<div class="mhdr"><div class="mtitle">Receive Stock — '+l.name+'</div><button class="mclose" data-action="close-m">✕</button></div>'
     +'<div class="mbody">'
-    +'<div class="abar blue" style="margin-bottom:8px">Records received weight/pieces for a specific lot and automatically updates the product inventory.</div>'
+    +'<div style="background:var(--S2);border-radius:var(--R);padding:10px 13px;margin-bottom:10px;display:flex;justify-content:space-between;font-size:12.5px">'
+    +'<span style="color:var(--hx)">Current stock in inventory:</span>'
+    +'<strong style="color:var(--at)">'+currentStock+'</strong></div>'
+    +'<div class="abar blue" style="margin-bottom:8px">Records received weight/pieces for a specific lot and adds to product inventory. Unit auto-detected from existing product.</div>'
     +'<div class="fg"><label class="fl">Lot Number</label>'
     +'<select class="fi" id="rl-lot">'+lotOpts+'</select></div>'
-    +'<div class="f3"><div class="fg"><label class="fl">Quantity Received</label>'
-    +'<input class="fi" id="rl-qty" type="number" min="0" step="0.001" placeholder="0"></div>'
-    +'<div class="fg"><label class="fl">Unit</label>'
-    +'<select class="fi" id="rl-unit"><option value="kg">kg</option><option value="pcs">pcs</option><option value="gm">gm</option><option value="litre">litre</option></select></div>'
-    +'<div class="fg"><label class="fl">Received Date</label>'
-    +'<input class="fi" id="rl-date" type="date" value="'+window.today()+'"></div></div>'
-    +'<div class="f2"><div class="fg"><label class="fl">MFD Date (optional)</label>'
+    +'<div class="f2"><div class="fg"><label class="fl">Quantity Received</label>'
+    +'<input class="fi" id="rl-qty" type="number" min="0" step="0.001" placeholder="0" style="font-size:16px;font-weight:600"></div>'
+    +'<div class="fg"><label class="fl">Unit (auto-detected)</label>'
+    +'<select class="fi" id="rl-unit">'+unitSel+'</select>'
+    +'<div style="font-size:10.5px;color:var(--hx);margin-top:3px">Auto-set from inventory. Change if needed.</div></div></div>'
+    +'<div class="f3"><div class="fg"><label class="fl">Received Date</label>'
+    +'<input class="fi" id="rl-date" type="date" value="'+window.today()+'"></div>'
+    +'<div class="fg"><label class="fl">MFD Date (optional)</label>'
     +'<input class="fi" id="rl-mfd" type="date"></div>'
     +'<div class="fg"><label class="fl">Expiry Date (optional)</label>'
     +'<input class="fi" id="rl-exp" type="date"></div></div>'
-    +'<div class="fg"><label class="fl">Note / Reference</label>'
-    +'<input class="fi" id="rl-note" placeholder="e.g. PO-2026-031, truck delivery…"></div>'
+    +'<div class="fg"><label class="fl">Note / Reference (e.g. PO number, vehicle)</label>'
+    +'<input class="fi" id="rl-note" placeholder="e.g. PO-2026-031, truck MH-12-AB-1234…"></div>'
     +'</div>'
     +'<div class="mfoot"><button class="btn" data-action="close-m">Cancel</button>'
     +'<button class="btn pr" data-action="do-recv-lot-stock" data-li="'+li+'">✅ Add to Product Stock</button>'
@@ -4013,11 +4123,16 @@ function doRecvLotStock(li){
 
   _pushUndo("Lot receive stock",["inv","lot","pattri"]);
 
-  // Update lot dates if provided
+  // Update lot dates and received quantity
   if(!l.lotDates)l.lotDates={};
-  if(mfd||exp){
-    l.lotDates[lotCode]={mfd:mfd||"",exp:exp||""};
-  }
+  var existLd=l.lotDates[lotCode]||{};
+  l.lotDates[lotCode]={
+    mfd:mfd||existLd.mfd||"",
+    exp:exp||existLd.exp||"",
+    receivedQty:(existLd.receivedQty||0)+qty,
+    receivedUnit:unit,
+    lastReceivedDate:window.today()
+  };
 
   // Feature 2: Find matching product in inventory and add qty
   var invProd=S.inv.find(function(p){return p.name===l.name;});
@@ -4093,6 +4208,97 @@ function clearProductShelfLife(idx){
   r.mfd="";r.exp="";
   logHistory("clear_shelf_life",r.name,"MFD and Expiry dates cleared");
   schedSave();render();toast("Shelf life cleared for "+r.name+" — press ↩ Undo to restore","info");
+}
+
+
+function showManualEntryForm(){
+  return '<div style="background:var(--S2);border:1px solid var(--bd);border-radius:var(--RL);padding:14px;margin-top:10px">'
+    +'<div style="font-size:13px;font-weight:600;margin-bottom:12px">📝 Manual Entry — enter invoice details</div>'
+    +'<div class="f2"><div class="fg"><label class="fl">Doc Type</label>'
+    +'<select class="fi" id="me-type"><option value="invoice">Invoice (deducts stock)</option><option value="po">Purchase Order (adds stock)</option></select></div>'
+    +'<div class="fg"><label class="fl">Doc Number</label><input class="fi" id="me-docnum" placeholder="INV-001 / PO-2026-001"></div></div>'
+    +'<div class="f2"><div class="fg"><label class="fl">Customer / Vendor Name</label><input class="fi" id="me-party" placeholder="Customer or Vendor name"></div>'
+    +'<div class="fg"><label class="fl">Date</label><input class="fi" id="me-date" type="date" value="'+window.today()+'"></div></div>'
+    +'<div style="font-size:11.5px;font-weight:600;color:var(--at);margin:10px 0 6px">Items</div>'
+    +'<div id="me-items">'
+    +buildManualItemRow(0)
+    +'</div>'
+    +'<button class="btn xs" onclick="addManualItemRow()" style="margin-top:6px">+ Add Item</button>'
+    +'<div class="fg" style="margin-top:10px"><label class="fl">Notes</label><input class="fi" id="me-notes" placeholder="Optional notes"></div>'
+    +'<div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn pr" onclick="confirmManualImport()">✅ Import Manual Data</button></div>'
+    +'</div>';
+}
+
+function buildManualItemRow(i){
+  return '<div id="me-row-'+i+'" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:end">'
+    +'<div class="fg" style="margin:0"><label class="fl">Product Name</label><input class="fi" id="me-name-'+i+'" placeholder="Product name"></div>'
+    +'<div class="fg" style="margin:0"><label class="fl">Qty</label><input class="fi" id="me-qty-'+i+'" type="number" min="0" placeholder="0"></div>'
+    +'<div class="fg" style="margin:0"><label class="fl">Unit</label><select class="fi" id="me-unit-'+i+'"><option value="kg">kg</option><option value="pcs">pcs</option><option value="gm">gm</option><option value="box">box</option></select></div>'
+    +'<div class="fg" style="margin:0"><label class="fl">Price (₹)</label><input class="fi" id="me-price-'+i+'" type="number" min="0" placeholder="0"></div>'
+    +(i>0?'<button class="btn xs dn" onclick="document.getElementById(\'me-row-'+i+'\').remove()">✕</button>':'<div></div>')
+    +'</div>';
+}
+
+window._meRows=1;
+function addManualItemRow(){
+  var i=window._meRows++;
+  var wrap=document.getElementById("me-items");
+  if(!wrap)return;
+  var div=document.createElement("div");
+  div.innerHTML=buildManualItemRow(i);
+  wrap.appendChild(div.firstChild);
+}
+
+function confirmManualImport(){
+  var docType=(document.getElementById("me-type")||{value:"invoice"}).value;
+  var docNum=(document.getElementById("me-docnum")||{value:""}).value.trim();
+  var party=(document.getElementById("me-party")||{value:""}).value.trim();
+  var date=(document.getElementById("me-date")||{value:""}).value||window.today();
+  var notes=(document.getElementById("me-notes")||{value:""}).value.trim();
+  var items=[];
+  for(var i=0;i<(window._meRows||1);i++){
+    var nm=(document.getElementById("me-name-"+i)||{value:""}).value.trim();
+    var qty=parseFloat((document.getElementById("me-qty-"+i)||{value:0}).value)||0;
+    var unit=(document.getElementById("me-unit-"+i)||{value:"kg"}).value;
+    var price=parseFloat((document.getElementById("me-price-"+i)||{value:0}).value)||0;
+    if(nm&&qty)items.push({name:nm,qty:qty,unit:unit,unitPrice:price,totalValue:qty*price});
+  }
+  if(!items.length){toast("Add at least one item","warn");return;}
+  var ext={docType:docType==="po"?"po":"invoice",docNumber:docNum,docDate:date,
+    customer:docType==="invoice"?party:"",vendor:docType==="po"?party:"",
+    items:items,totalAmount:items.reduce(function(a,it){return a+it.totalValue;},0),notes:notes};
+  window._pdfExtracted=ext;
+  showPDFExtracted(ext);
+  var btn=document.getElementById("pdf-import-btn");
+  if(btn)btn.style.display="inline-flex";
+  toast("Manual data ready — review and click Import ✓","ok");
+}
+
+// Switch which lot is shown in shelf life card (live dropdown change)
+function switchShelfLifeView(sel,invIdx){
+  var lotCode=sel.value;
+  if(!lotCode)return; // "view all" — do nothing extra
+  var r=S.inv[invIdx];if(!r)return;
+  var lg=S.lot.find(function(l){return l.name===r.name;});
+  if(!lg)return;
+  var ld=(lg.lotDates&&lg.lotDates[lotCode])||{};
+  // Temporarily update the display (not saved unless user clicks Set Current)
+  var card=sel.closest('.card');if(!card)return;
+  // Update MFD/Used/Expiry stats in the card without re-render
+  var mfd=ld.mfd||"",exp=ld.exp||"";
+  var dl=exp?daysLeft(exp):null;
+  var pct=mfd&&exp?Math.min(100,Math.round((new Date()-new Date(mfd))/(new Date(exp)-new Date(mfd))*100)):0;
+  var colMap={null:"var(--hx)"};
+  var col=dl===null?"var(--hx)":dl<0?"var(--r2)":dl<=14?"var(--r2)":dl<=30?"var(--y2)":"var(--g2)";
+  var infoEl=card.querySelector(".slf-lot-info");
+  if(infoEl){
+    infoEl.innerHTML='<div style="font-size:11px;color:var(--hx);padding:6px 0;border-top:1px solid var(--bd);margin-top:4px">'
+      +'Viewing lot: <strong style="color:var(--at);font-family:monospace">'+lotCode+'</strong>'
+      +(mfd?' · MFD: '+fd(mfd):'')
+      +(exp?' · Exp: <span style="color:'+col+'">'+fd(exp)+(dl!==null?(dl<0?' (EXPIRED)':' ('+dl+'d left)'):'')+' </span>':'')
+      +'<br><button class="btn xs" style="margin-top:4px" onclick="setCurrentLot('+S.lot.indexOf(lg)+',' + "'" + lotCode + "'" + ')">★ Set as Current Lot</button>'
+      +'</div>';
+  }
 }
 
 // ══════════════════════════════════════════════
