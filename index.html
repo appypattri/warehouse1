@@ -372,7 +372,7 @@ input.fi[readonly]{color:var(--hx);cursor:default;}
         <button class="btn sm pu" data-tab="ai">🤖 <span class="hide-sm">AI Predict</span></button>
         <button class="btn sm te" data-tab="reports">📊 <span class="hide-sm">Reports</span></button>
         <button class="btn sm" data-action="open-pdf-import">📄 <span class="hide-sm">Import PDF</span></button>
-        <button class="btn sm" onclick="_doUndo()" title="Undo last change">↩ <span class="hide-sm">Undo</span></button>
+        <button class="btn sm" data-action="do-undo" id="undo-btn" title="Undo last change">↩ <span class="hide-sm">Undo</span></button>
         <button class="btn sm gr" data-action="full-backup">💾 <span class="hide-sm">Backup</span></button>
         <button class="btn sm" onclick="exportAll()">⬇ <span class="hide-sm">Export</span></button>
         <button class="btn sm" onclick="window.print()">🖨</button>
@@ -533,10 +533,25 @@ function _loadData(uid){
         _loadData(uid);return;
       }
     }
+    // Ensure all arrays are valid after load + sanitise types
+    if(window.S){
+      var arrKeys=["inv","pkt","proc","ord","lot","vendors","customers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"];
+      arrKeys.forEach(function(k){if(!Array.isArray(S[k]))S[k]=[];});
+      if(!S.seq||isNaN(S.seq))S.seq=1;
+      // Sanitise inventory: ensure qty is always a number
+      S.inv.forEach(function(r){r.qty=parseFloat(r.qty)||0;r.minQty=parseFloat(r.minQty)||0;});
+      S.pkt.forEach(function(r){r.qty=parseFloat(r.qty)||0;});
+      S.boxes.forEach(function(r){r.qty=parseFloat(r.qty)||0;});
+      // Cap movements & history if they grew too large
+      if(S.movements.length>1000)S.movements=S.movements.slice(0,1000);
+      if(S.history.length>1000)S.history=S.history.slice(0,1000);
+    }
     showApp();
     if(window.render)render();
   }).catch(function(e){
     if(window.toast)toast("Load error: "+e.message,"warn");
+    // Still show app with whatever state we have
+    if(window.S){["inv","pkt","proc","ord","lot","vendors","customers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"].forEach(function(k){if(!Array.isArray(S[k]))S[k]=[];});}
     showApp();
     if(window.render)render();
   });
@@ -546,6 +561,19 @@ function _saveNow(uid){
   _setSS("sv");
   var targetId=window._workspaceId||uid;
   if(!_db||!targetId)return;
+  // Data size guard — Firestore doc limit ~1MB
+  if(window.S){
+    var sizeEst=0;
+    ["inv","pkt","proc","ord","lot","vendors","customers","movements","history"].forEach(function(k){
+      try{sizeEst+=JSON.stringify(S[k]||[]).length;}catch(e){}
+    });
+    if(sizeEst>900000&&window.toast){
+      toast("⚠ Data size is large ("+Math.round(sizeEst/1024)+"KB). Consider archiving old movements/history.","warn");
+    }
+    // Auto-trim excess: keep only last 800 movements, 800 history
+    if((S.movements||[]).length>800)S.movements=S.movements.slice(0,800);
+    if((S.history||[]).length>800)S.history=S.history.slice(0,800);
+  }
   var payload={seq:window.S?S.seq:1,updatedAt:new Date().toISOString(),settings:window.CFG?JSON.stringify(CFG):"{}",lastEditBy:window._userEmail||uid,lastEditName:window._userName||""};
   if(window.S){
     ["inv","pkt","proc","ord","lot","vendors","customers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"].forEach(function(k){
@@ -581,26 +609,59 @@ _waitFirebase();
 // ══════════════════════════════════════════════
 const CFG={lowThresh:2000,pktLowThreshWt:200,pktLowThreshPcs:200,pktLowThresh:200,lowThreshWt:2000,lowThreshPcs:500,warnDays:60,currency:"₹"};
 // ── Global undo stack ──────────────────────────
+// ── UNDO SYSTEM ─────────────────────────────────────────────────
 var _undoStack=[];
+
 function _pushUndo(label,snapshotKeys){
-  // Deep-clone requested keys from S
-  var snap={};
-  (snapshotKeys||["inv","pkt","proc","ord","lot","vendors","customers","boxes","pattri","boxConfigs","movements"]).forEach(function(k){
-    try{snap[k]=JSON.parse(JSON.stringify(S[k]));}catch(e){}
+  if(!window.S)return;
+  var keys=snapshotKeys||["inv","pkt","proc","ord","lot","vendors","customers","boxes","pattri","boxConfigs","movements","history"];
+  var snap={_seq:S.seq||1,_label:label,_ts:Date.now()};
+  keys.forEach(function(k){
+    if(S[k]!==undefined){
+      try{snap[k]=JSON.parse(JSON.stringify(S[k]));}
+      catch(e){snap[k]=[];}
+    }
   });
-  snap._seq=S.seq;
   _undoStack.push({label:label,snap:snap,ts:Date.now()});
-  if(_undoStack.length>30)_undoStack.shift(); // max 30 undo steps
+  if(_undoStack.length>30)_undoStack.shift();
+  _updateUndoBtn();
 }
+
 function _doUndo(){
-  if(!_undoStack.length){toast("Nothing to undo","info");return;}
+  if(!_undoStack.length){toast("Nothing to undo","info");_updateUndoBtn();return;}
   var entry=_undoStack.pop();
-  Object.keys(entry.snap).forEach(function(k){
-    if(k==="_seq"){S.seq=entry.snap._seq;return;}
-    try{S[k]=JSON.parse(JSON.stringify(entry.snap[k]));}catch(e){}
+  var snap=entry.snap;
+  // Restore all snapshotted keys
+  Object.keys(snap).forEach(function(k){
+    if(k==="_seq"){S.seq=snap._seq;return;}
+    if(k==="_label"||k==="_ts")return; // metadata, skip
+    if(S.hasOwnProperty(k)||["inv","pkt","proc","ord","lot","vendors","customers","boxes","pattri","boxConfigs","movements","history","allowedUsers","backups"].indexOf(k)>=0){
+      try{
+        var restored=JSON.parse(JSON.stringify(snap[k]));
+        S[k]=Array.isArray(restored)?restored:(restored||[]);
+      }catch(e){}
+    }
   });
-  schedSave();render();
-  toast("↩ Undone: "+entry.label,"info");
+  _updateUndoBtn();
+  schedSave();
+  render();
+  toast("↩ Undone: "+entry.label+" ✓","info");
+}
+
+function _updateUndoBtn(){
+  var btn=document.getElementById("undo-btn");
+  if(!btn)return;
+  var n=_undoStack.length;
+  btn.disabled=!n;
+  btn.style.opacity=n?"1":"0.45";
+  if(n){
+    var lbl=_undoStack[n-1].label||"";
+    btn.title="Undo: "+lbl+" ("+n+" step"+(n>1?"s":"")+" available)";
+    btn.innerHTML="↩ <span class=\"hide-sm\">Undo: "+lbl.slice(0,12)+"</span>";
+  } else {
+    btn.title="Nothing to undo";
+    btn.innerHTML="↩ <span class=\"hide-sm\">Undo</span>";
+  }
 }
 let S={inv:[],pkt:[],proc:[],ord:[],lot:[],vendors:[],customers:[],movements:[],boxConfigs:[],boxes:[],pattri:[],history:[],allowedUsers:[],backups:[],seq:1};
 let TAB="dashboard",FV={},OT="product";
@@ -705,11 +766,20 @@ function resetToDefaults(){
 // ══════════════════════════════════════════════
 //  UTILS
 // ══════════════════════════════════════════════
+
+// ── Safe HTML escaper (XSS prevention for user-displayed text) ──────────
+function esc(s){
+  if(s===null||s===undefined)return"";
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
 const N=n=>Number(n||0).toLocaleString("en-IN");
 const fd=s=>{if(!s||s==="—")return"—";const d=new Date(s);return isNaN(d)?s:d.toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"2-digit"});};
 const today=()=>new Date().toISOString().split("T")[0];
 const uid=()=>Math.random().toString(36).slice(2,9);
 const gv=id=>{const e=document.getElementById(id);return e?e.value:"";};
+// XSS-safe HTML escape for user data displayed via innerHTML
+const escH=s=>{if(!s&&s!==0)return"";return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");};
 // ── Packet type colour badge ──────────────────
 const PKT_PALETTE=["#2563eb","#d97706","#7c3aed","#059669","#db2777","#0891b2","#65a30d","#dc2626","#0284c7","#9333ea"];
 const PKT_NAMED={"small packets":"#2563eb","big packets":"#d97706","medium packets":"#7c3aed","gift pack":"#db2777","export box":"#059669","retail pack":"#0891b2","bulk pack":"#65a30d","sample pack":"#9333ea"};
@@ -761,13 +831,16 @@ const expSoon=()=>{const s=new Date();s.setDate(s.getDate()+CFG.warnDays);return
 // Log stock movement
 function logMove(type,product,qty,unit,ref,note){
   S.movements.unshift({id:uid(),type,product,qty,unit,ref,note,date:today(),ts:Date.now()});
-  if(S.movements.length>500)S.movements=S.movements.slice(0,500);
+  if(S.movements.length>1000)S.movements=S.movements.slice(0,1000);
   // Also log to activity history
   logHistory("stock_"+type, product, qty+" "+unit+(ref?" ("+ref+")":"")+(note?" — "+note:""));
 }
 
 // Log any data change to activity history
 function logHistory(action, target, detail){
+  if(!action)return;
+  target=String(target||"").slice(0,200);
+  detail=String(detail||"").slice(0,500);
   var now=new Date();
   var entry={
     id:uid(),
@@ -784,7 +857,7 @@ function logHistory(action, target, detail){
   };
   if(!S.history)S.history=[];
   S.history.unshift(entry);
-  if(S.history.length>1000)S.history=S.history.slice(0,1000);
+  if(S.history.length>1000)S.history=S.history.slice(0,1000); // keep only latest 1000
 }
 
 // ══════════════════════════════════════════════
@@ -792,18 +865,30 @@ function logHistory(action, target, detail){
 // ══════════════════════════════════════════════
 function render(){
   requestAnimationFrame(()=>{
-    buildNav();
-    document.getElementById("pg-title").textContent=(TABS[TAB]||{title:TAB}).title;
-    document.getElementById("pg-sub").textContent=(TABS[TAB]||{sub:""}).sub;
-    document.getElementById("content").innerHTML=buildPane();
-    attachEvents();
+    try{
+      buildNav();
+      document.getElementById("pg-title").textContent=(TABS[TAB]||{title:TAB}).title;
+      document.getElementById("pg-sub").textContent=(TABS[TAB]||{sub:""}).sub;
+      var paneHtml="";
+      try{paneHtml=buildPane();}catch(paneErr){
+        paneHtml='<div class="abar red" style="margin:20px">⚠ Error rendering page: '+paneErr.message+'<br><small style="opacity:.7">'+paneErr.stack.split("\\n")[0]+'</small><br><br><button class="btn pr" onclick="TAB=\'dashboard\';render()">↩ Go to Dashboard</button></div>';
+      }
+      document.getElementById("content").innerHTML=paneHtml;
+      attachEvents();
+      if(typeof _updateUndoBtn==="function")_updateUndoBtn(); // sync undo button state
+    }catch(e){
+      console.error("render() error:",e);
+    }
   });
 }
 
 function buildNav(){
-  const lows=lowItems().length,exps=expSoon().filter(r=>daysLeft(r.exp)<=14).length;
-  const pktLows=lowPktItems().length;
-  const pend=S.ord.filter(o=>o.status==="pending").length;
+  if(!window.S||!S.inv)return; // guard against early call
+  var lows=0,exps=0,pktLows=0,pend=0;
+  try{lows=lowItems().length;}catch(e){}
+  try{exps=expSoon().filter(r=>daysLeft(r.exp)<=14).length;}catch(e){}
+  try{pktLows=lowPktItems().length;}catch(e){}
+  try{pend=S.ord.filter(o=>o.status==="pending").length;}catch(e){}
   const groups=[
     {sec:"Overview",id:"grp-overview",items:[
       {id:"dashboard",icon:"📊",label:"Dashboard"}
@@ -949,7 +1034,12 @@ function pDash(){
 // ─── PRODUCT INVENTORY ────────────────────────
 function pInv(){
   const q=(FV.inv||"").toLowerCase(),u=FV["inv-u"]||"";
-  const rows=S.inv.filter(r=>(!q||[r.name,r.lot,r.cat].join(" ").toLowerCase().includes(q))&&(!u||r.unit===u));
+  const allRows=S.inv.filter(r=>(!q||[r.name,r.lot,r.cat].join(" ").toLowerCase().includes(q))&&(!u||r.unit===u));
+  const PAGE_INV=50;
+  const invPage=parseInt(FV["inv_page"]||0);
+  const rows=allRows.slice(invPage*PAGE_INV,(invPage+1)*PAGE_INV);
+  const invTotal=allRows.length;
+  const invPages=Math.ceil(invTotal/PAGE_INV);
   return`
   <div class="frow">
     <input class="si" placeholder="🔍 Search product or lot…" value="${FV.inv||""}" data-filter="inv">
@@ -964,7 +1054,7 @@ function pInv(){
   <div class="tw"><table><thead><tr><th>#</th><th>Product</th><th>Lot</th><th>Category</th><th>Qty</th><th>Min Qty</th><th>Unit</th><th>MFD</th><th>Expiry</th><th>Shelf Life</th><th>Actions</th></tr></thead><tbody>
   ${rows.length?rows.map((r,i)=>{const dl=daysLeft(r.exp);const low=r.qty<=(r.minQty||CFG.lowThresh);return`<tr class="dr ${low?"low":""} ${slfCls(dl)}">
     <td class="d">${i+1}</td>
-    <td><strong>${r.name}</strong>${low?" "+bx("r","Low"):""}</td>
+    <td><strong>${escH(r.name)}</strong>${low?" "+bx("r","Low"):""}</td>
     <td class="mo">${r.lot}<span style="cursor:pointer;margin-left:4px;font-size:10px;color:var(--b2)" onclick="goToLot('${r.name}')" title="View in Lot Tracking">🏷</span></td><td>${bx("g",r.cat)}</td>
     <td><strong>${N(r.qty)}</strong></td>
     <td class="d">${N(r.minQty||CFG.lowThresh)}</td>
@@ -977,14 +1067,19 @@ function pInv(){
       <button class="btn xs dn" data-action="del-inv" data-i="${S.inv.indexOf(r)}">🗑</button>
     </div></td>
   </tr>`;}).join(""):`<tr class="empty"><td colspan="11">No products found</td></tr>`}
-  </tbody></table></div>`;
+  </tbody></table></div>
+  ${(typeof invPages!=="undefined"&&invPages>1)?('<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;font-size:12.5px;flex-wrap:wrap">'
+    +'<button class="btn xs" data-action="inv-page-prev"'+(invPage===0?' disabled':'')+'>◀ Prev</button>'
+    +'<span style="color:var(--hx)">Page '+(invPage+1)+' / '+invPages+' · '+invTotal+' total</span>'
+    +'<button class="btn xs" data-action="inv-page-next"'+(invPage>=invPages-1?' disabled':'')+'>Next ▶</button>'
+    +'</div>'):''}`;
 }
 
 // ─── SHELF LIFE ───────────────────────────────
 function pShelfLife(){
   const q=(FV.slf||"").toLowerCase(),f=FV["slf-f"]||"all";
   const prodFilter=FV["slf-prod"]||"";
-  const sortBy=FV["slf-sort"]||"exp";
+  const sortBy=FV["slf-sort"]||"newest"; // default: newest added first
   let rows=S.inv.filter(r=>{
     if(r._slfHidden)return false;
     if(q&&!r.name.toLowerCase().includes(q)&&!r.lot.toLowerCase().includes(q))return false;
@@ -997,7 +1092,8 @@ function pShelfLife(){
   else if(f==="good")rows=rows.filter(r=>{const d=daysLeft(r.exp);return d===null||d>CFG.warnDays;});
   if(sortBy==="name")rows=rows.sort((a,b)=>a.name.localeCompare(b.name));
   else if(sortBy==="pct")rows=rows.sort((a,b)=>slfPct(b.mfd,b.exp)-slfPct(a.mfd,a.exp));
-  else rows=rows.sort((a,b)=>(daysLeft(a.exp)!==null?daysLeft(a.exp):9999)-(daysLeft(b.exp)!==null?daysLeft(b.exp):9999));
+  else if(sortBy==="exp")rows=rows.sort((a,b)=>(daysLeft(a.exp)!==null?daysLeft(a.exp):9999)-(daysLeft(b.exp)!==null?daysLeft(b.exp):9999));
+  else rows=rows.slice().reverse(); // "newest" = reverse insertion order (most recently added first)
   return`
   <div style="background:var(--S);border:1px solid var(--bd);border-radius:var(--RL);padding:13px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
     <div><div style="font-size:13px;font-weight:500">Warning threshold</div><div style="font-size:11px;color:var(--hx)">Alert when shelf life is below N days</div></div>
@@ -1016,8 +1112,9 @@ function pShelfLife(){
       <option value="">All products</option>
       ${[...new Set(S.inv.map(r=>r.name))].sort().map(n=>`<option value="${n}" ${(FV["slf-prod"]||"")===n?"selected":""}>${n}</option>`).join("")}
     </select>
-    <select class="si" data-filter="slf-sort" style="width:130px">
-      <option value="exp" ${(FV["slf-sort"]||"exp")==="exp"?"selected":""}>Sort: Expiry ↑</option>
+    <select class="si" data-filter="slf-sort" style="width:140px">
+      <option value="newest" ${(FV["slf-sort"]||"newest")==="newest"?"selected":""}>Sort: Newest First</option>
+      <option value="exp" ${(FV["slf-sort"]||"")==="exp"?"selected":""}>Sort: Expiry ↑</option>
       <option value="name" ${(FV["slf-sort"]||"")==="name"?"selected":""}>Sort: Name</option>
       <option value="pct" ${(FV["slf-sort"]||"")==="pct"?"selected":""}>Sort: Used %</option>
     </select>
@@ -1273,7 +1370,8 @@ function pReports(){
 // ─── LOT TRACKING ─────────────────────────────
 function pLots(){
   const q=(FV.lot||"").toLowerCase();
-  const lots=S.lot.filter(l=>!q||[l.name,...l.lots].join(" ").toLowerCase().includes(q));
+  // Newest lots at top — reverse so most recently added lot groups appear first
+  const lots=S.lot.filter(l=>!q||[l.name,...l.lots].join(" ").toLowerCase().includes(q)).slice().reverse();
   return`
   <div class="frow">
     <input class="si" placeholder="🔍 Search product or lot…" value="${FV.lot||""}" data-filter="lot">
@@ -1294,7 +1392,8 @@ function pLots(){
         <button class="btn xs dn" data-action="del-lot-prod" data-li="${li}" title="Delete product tracking">🗑</button>
       </div>
     </div>
-    <div class="lot-tags">${l.lots.map((t,ti)=>{
+    <div class="lot-tags">${l.lots.slice().reverse().map((t,_ri)=>{ const ti=l.lots.length-1-_ri; // real index in original array
+      const ti_real=l.lots.indexOf(t);  // real index for callbacks
       var ld=(l.lotDates&&l.lotDates[t])||{};
       var dl=ld.exp?Math.round((new Date(ld.exp)-new Date())/864e5):null;
       var dlCol=dl===null?"var(--hx)":dl<0?"var(--r2)":dl<=14?"var(--r2)":dl<=30?"var(--y2)":"var(--g2)";
@@ -1303,7 +1402,7 @@ function pLots(){
         <span style="display:flex;align-items:center;gap:3px;width:100%">
           <span style="font-family:'DM Mono',monospace;font-size:11px;font-weight:600">${t}${t===l.current?" ✓":""}</span>
           <span style="margin-left:auto;display:flex;gap:2px">
-            <span style="cursor:pointer;font-size:10px;opacity:.7" onclick="openEditLotCode(${li},${ti})" title="Edit">✏</span>
+            <span style="cursor:pointer;font-size:10px;opacity:.7" onclick="openEditLotCode(${li},${ti_real})" title="Edit">✏</span>
             ${t!==l.current?`<span style="cursor:pointer;font-size:10px;opacity:.7;color:var(--at)" onclick="setCurrentLot(${li},'${t}')" title="Set as current">★</span>`:""}
             <span style="cursor:pointer;font-size:10px;opacity:.6;color:var(--r2)" onclick="removeLotCode(${li},${ti})" title="Remove">✕</span>
           </span>
@@ -1966,6 +2065,7 @@ function attachEvents(){
   };
   // Topbar buttons
   document.querySelector(".tb-right").onclick=handleClick;
+  _updateUndoBtn();
 }
 
 function handleClick(e){
@@ -1973,6 +2073,11 @@ function handleClick(e){
   const a=el.dataset.action,t=el.dataset.tab;
   if(t){TAB=t;closeM();closeSidebar();render();return;}
   switch(a){
+    case"do-undo":_doUndo();break;
+    case"ord-page-prev":{FV["ord_page"]=Math.max(0,(parseInt(FV["ord_page"]||0)-1));try{document.getElementById("content").innerHTML=buildPane();}catch(ex){}}break;
+    case"ord-page-next":{FV["ord_page"]=(parseInt(FV["ord_page"]||0)+1);try{document.getElementById("content").innerHTML=buildPane();}catch(ex){}}break;
+    case"inv-page-prev":{FV["inv_page"]=Math.max(0,(parseInt(FV["inv_page"]||0)-1));try{document.getElementById("content").innerHTML=buildPane();}catch(ex){}}break;
+    case"inv-page-next":{FV["inv_page"]=(parseInt(FV["inv_page"]||0)+1);try{document.getElementById("content").innerHTML=buildPane();}catch(ex){}}break;
     case"close-m":closeM();break;
     case"open-inv":openInvModal(null);break;
     case"edit-inv":openInvModal(+el.dataset.i);break;
@@ -2112,8 +2217,28 @@ function handleClick(e){
   }
 }
 
-function handleInput(e){const el=e.target;if(el.dataset.filter){FV[el.dataset.filter]=el.value;requestAnimationFrame(()=>{document.getElementById("content").innerHTML=buildPane();});}}
-function handleChange(e){const el=e.target;if(el.dataset.filter){FV[el.dataset.filter]=el.value;requestAnimationFrame(()=>{document.getElementById("content").innerHTML=buildPane();});}}
+var _filterTimer=null;
+function handleInput(e){
+  var el=e.target;
+  if(el.dataset.filter){
+    // Reset page when filter changes
+    if(el.dataset.filter==="inv")FV["inv_page"]=0;
+    if(el.dataset.filter==="ord")FV["ord_page"]=0;
+    FV[el.dataset.filter]=el.value;
+    // Debounce: wait 180ms after last keystroke before re-rendering
+    if(_filterTimer)clearTimeout(_filterTimer);
+    _filterTimer=setTimeout(function(){
+      try{document.getElementById("content").innerHTML=buildPane();}catch(ex){console.error(ex);}
+    },180);
+  }
+}
+function handleChange(e){
+  var el=e.target;
+  if(el.dataset.filter){
+    FV[el.dataset.filter]=el.value;
+    try{document.getElementById("content").innerHTML=buildPane();}catch(ex){console.error(ex);}
+  }
+}
 
 // ══════════════════════════════════════════════
 //  SAVERS
@@ -2218,6 +2343,7 @@ function saveProc(idx){
     agentName:gv("m-agent").trim(),agentPhone:gv("m-agentph").trim()
   };
   if(!r.vendor){toast("Vendor name required","warn");return;}
+  if(idx!=null)_pushUndo("Edit PO",["proc"]);
   if(idx==null)S.proc.push(r);else S.proc[idx]=r;
   logHistory(idx==null?"add_po":"edit_po",r.vendor,"PO="+r.po+", qty="+r.qty+", status="+r.status);
   closeM();schedSave();render();toast(idx==null?"PO added ✓":"PO updated ✓","ok");
@@ -2279,6 +2405,7 @@ function saveOrder(idx){
   var deliveryName=gv("m-del-name").trim();
   var deliveryPhone=gv("m-del-ph").trim();
   if(!cust){toast("Customer name required","warn");return;}
+  if(cust.length>200){toast("Customer name too long","warn");return;}
 
   // Collect items from all rows
   var items=[];
@@ -2398,6 +2525,7 @@ function saveVendor(idx){
   if(idx!=null)_pushUndo("Edit vendor",["vendors","proc"]);
   const v={id:idx!=null?S.vendors[idx].id:"V"+uid(),name:gv("m-vname").trim(),contact:gv("m-vcontact").trim(),phone:gv("m-vphone").trim(),email:gv("m-vemail").trim(),city:gv("m-vcity").trim(),terms:gv("m-vterms").trim(),rating:parseInt(gv("m-vrating"))||0,notes:gv("m-vnotes").trim()};
   if(!v.name){toast("Vendor name required","warn");return;}
+  if(v.name.length>150){toast("Vendor name too long (max 150 chars)","warn");return;}
   if(idx==null)S.vendors.push(v);else S.vendors[idx]=v;
   // Interlink: if renamed, update PO vendor references
   if(idx!=null&&oldName&&oldName!==v.name){
@@ -2412,6 +2540,7 @@ function saveCustomer(idx){
   if(idx!=null)_pushUndo("Edit customer",["customers","ord"]);
   const c={id:idx!=null?S.customers[idx].id:"C"+uid(),name:gv("m-cname").trim(),contact:gv("m-ccontact").trim(),phone:gv("m-cphone").trim(),email:gv("m-cemail").trim(),city:gv("m-ccity").trim(),creditDays:parseInt(gv("m-ccredit"))||0,notes:gv("m-cnotes").trim()};
   if(!c.name){toast("Customer name required","warn");return;}
+  if(c.name.length>150){toast("Customer name too long (max 150 chars)","warn");return;}
   if(idx==null)S.customers.push(c);else S.customers[idx]=c;
   // Interlink: if renamed, update order customer references
   if(idx!=null&&oldName&&oldName!==c.name){
@@ -2624,7 +2753,12 @@ function pProc(){
 // ─── ORDERS ────────────────────────────────────────────────────
 function pOrders(){
   const q=(FV.ord||"").toLowerCase(),st=FV["ord-st"]||"";
-  const rows=S.ord.filter(r=>(!q||[r.id,r.customer,r.product||"",r.status].join(" ").toLowerCase().includes(q))&&(!st||r.status===st));
+  const allOrds=S.ord.filter(r=>(!q||[r.id,r.customer,r.product||"",r.status].join(" ").toLowerCase().includes(q))&&(!st||r.status===st));
+  const ordPage=parseInt(FV["ord_page"]||0);
+  const PAGE_ORD=30;
+  const ordPages=Math.ceil(allOrds.length/PAGE_ORD);
+  // Show newest orders first
+  const rows=allOrds.slice().reverse().slice(ordPage*PAGE_ORD,(ordPage+1)*PAGE_ORD);
   const totalVal=S.ord.filter(o=>o.status!=="cancelled").reduce((a,o)=>a+(o.value||0),0);
   return`
   ${totalVal>0?`<div class="abar blue">💰 Total order value: <strong>${CFG.currency}${N(totalVal)}</strong> (excluding cancelled)</div>`:""}
@@ -2646,7 +2780,7 @@ function pOrders(){
     </div>
   </div>
   <div class="tw"><table><thead><tr><th>Order ID</th><th>Customer</th><th>Items</th><th>Total Qty</th><th>Value</th><th>Date</th><th>Expiry</th><th>Dispatch</th><th>Status</th><th>Delivery</th><th>Actions</th></tr></thead><tbody>
-  ${rows.length?rows.slice().reverse().map(r=>{
+  ${rows.length?rows.map(r=>{
     const itemList=r.items&&r.items.length?r.items:[{product:r.product,qty:r.qty,unit:r.unit}];
     const firstItem=itemList[0]||{};
     return`<tr class="dr">
@@ -2671,7 +2805,12 @@ function pOrders(){
       ${r.status!=="cancelled"?`<button class="btn xs dn" data-action="cancel-ord" data-i="${S.ord.indexOf(r)}">✕</button>`:""}
     </div></td>
   </tr>`;}).join(""):`<tr class="empty"><td colspan="11">No orders yet — click "+ New Order".</td></tr>`}
-  </tbody></table></div>`;
+  </tbody></table></div>
+  ${(typeof ordPages!=="undefined"&&ordPages>1)?('<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;font-size:12.5px;flex-wrap:wrap">'
+    +'<button class="btn xs" data-action="ord-page-prev"'+(ordPage===0?' disabled':'')+'>◀ Prev</button>'
+    +'<span style="color:var(--hx)">Page '+(ordPage+1)+' / '+ordPages+' · '+allOrds.length+' orders total</span>'
+    +'<button class="btn xs" data-action="ord-page-next"'+(ordPage>=ordPages-1?' disabled':'')+'>Next ▶</button>'
+    +'</div>'):''}`;
 }
 
 // ─── STOCK MOVEMENTS ───────────────────────────────────────────
@@ -3286,6 +3425,14 @@ function pHistory(){
     return html;
   }
 
+  // Cap to 300 newest entries for performance, show count
+  var capMsg="";
+  if(rows.length>300){
+    capMsg='<div class="abar amber" style="margin-bottom:12px">📋 Showing 300 newest of '+rows.length+' matches. Use filters to narrow down.</div>';
+    rows=rows.slice(0,300);
+  }
+  html+=capMsg;
+
   // Group by date
   var grouped={};
   rows.forEach(function(h){
@@ -3311,9 +3458,9 @@ function pHistory(){
       html+='<div style="flex:1;min-width:0">';
       html+='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:3px">';
       html+='<span style="font-size:12.5px;font-weight:600">'+label+'</span>';
-      if(h.target)html+='<span style="font-size:12.5px;color:var(--at)">'+h.target+'</span>';
+      if(h.target)html+='<span style="font-size:12.5px;color:var(--at)">'+esc(h.target)+'</span>';
       html+='</div>';
-      if(h.detail)html+='<div style="font-size:12px;color:var(--mx);margin-bottom:3px">'+h.detail+'</div>';
+      if(h.detail)html+='<div style="font-size:12px;color:var(--mx);margin-bottom:3px">'+esc(h.detail)+'</div>';
       html+='<div style="display:flex;align-items:center;gap:10px;font-size:11px;color:var(--hx);flex-wrap:wrap">';
       html+='<span style="display:flex;align-items:center;gap:3px">👤 <strong style="color:var(--mx)">'+h.user+'</strong></span>';
       if(h.email&&h.email!==h.user)html+='<span>'+h.email+'</span>';
@@ -3326,7 +3473,7 @@ function pHistory(){
     html+='</div>';
   });
 
-  if(rows.length>=100)html+='<div style="text-align:center;padding:14px;color:var(--hx);font-size:12px">Showing '+rows.length+' of '+(S.history||[]).length+' total changes</div>';
+  // Row count shown via cap message above
 
   return html;
 }
@@ -3568,6 +3715,7 @@ function saveBulkOrder(){
   var bQty=parseFloat((document.getElementById("bo-box-qty")||{value:0}).value)||0;
 
   if(!cust){toast("Customer name required","warn");return;}
+  if(cust.length>200){toast("Customer name too long","warn");return;}
 
   // Validate box stock
   if(bIdx!==""&&bQty>0){
