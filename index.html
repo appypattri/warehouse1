@@ -2187,76 +2187,173 @@ function openOrderModal(idx){
 
 // ── NEW buildOrderItemRow: Products and Packets in separate columns with lot select
 function buildOrderItemRow(i, item) {
-  var invOpts = '<option value="">— Select Product —</option>'
+  // item may have: srcKey (legacy), or invSrcKey + pktSrcKey (new dual mode)
+  var invSrcKey = item ? (item.invSrcKey || (item.srcKey&&item.srcKey.startsWith('inv:')?item.srcKey:'')) : '';
+  var pktSrcKey = item ? (item.pktSrcKey || (item.srcKey&&item.srcKey.startsWith('pkt:')?item.srcKey:'')) : '';
+  var invQty    = item ? (item.invQty  || (invSrcKey?item.qty:0) || 0) : 0;
+  var pktQty    = item ? (item.pktQty  || (pktSrcKey?item.qty:0) || 0) : 0;
+  var price     = item ? (item.price  || 0) : 0;
+  var lotSel    = item ? (item.lot    || '') : '';
+
+  // Product options
+  var invOpts = '<option value="">— Select Product (optional) —</option>'
     + S.inv.map(function(r,j){
-        var sel = item && item.srcKey === 'inv:'+j ? 'selected' : '';
+        var sel = invSrcKey === 'inv:'+j ? 'selected' : '';
         return '<option value="inv:'+j+'" '+sel+'>'+r.name+' · '+r.lot+' ('+N(r.qty)+' '+r.unit+')</option>';
       }).join('');
 
-  var pktOpts = '<option value="">— Select Packet —</option>'
+  // Packet options
+  var pktOpts = '<option value="">— Select Packet (optional) —</option>'
     + S.pkt.map(function(r,j){
-        var sel = item && item.srcKey === 'pkt:'+j ? 'selected' : '';
-        return '<option value="pkt:'+j+'" '+sel+'>'+r.name+' ('+r.type+') — '+N(r.qty)+' '+r.unit+'</option>';
+        var sel = pktSrcKey === 'pkt:'+j ? 'selected' : '';
+        return '<option value="pkt:'+j+'" '+sel+'>'+r.name+' ('+r.type+') · '+N(r.qty)+' '+r.unit+'</option>';
       }).join('');
 
-  var qty   = item ? item.qty   : '';
-  var price = item ? item.price : '';
-  var lotSel = item ? (item.lot||'') : '';
-
-  // Build lot options for the currently selected product
+  // Lot options for selected product
   var lotOpts = '<option value="">— Lot —</option>';
-  if (item && item.srcKey && item.srcKey.indexOf('inv:') === 0) {
-    var pidx = +item.srcKey.split(':')[1];
+  if (invSrcKey && invSrcKey.indexOf('inv:') === 0) {
+    var pidx = +invSrcKey.split(':')[1];
     var prod = S.inv[pidx];
     if (prod) {
       var lg = S.lot.find(function(l){ return l.name === prod.name; });
       if (lg) {
         lotOpts = lg.lots.slice().reverse().map(function(lt){
-          var sel = lt === lotSel ? 'selected' : '';
-          var ld  = (lg.lotDates||{})[lt]||{};
+          var ld = (lg.lotDates||{})[lt]||{};
           var tag = lt === lg.current ? ' ✓' : '';
-          var qty_tag = ld.receivedQty ? ' ('+N(ld.receivedQty)+' '+ld.receivedUnit+')' : '';
-          return '<option value="'+lt+'" '+sel+'>'+lt+tag+qty_tag+'</option>';
+          var qtag = ld.receivedQty ? ' ('+N(ld.receivedQty)+' '+ld.receivedUnit+')' : '';
+          return '<option value="'+lt+'" '+(lt===lotSel||lt===lg.current?'selected':'')+'>'+lt+tag+qtag+'</option>';
         }).join('');
-      } else {
+      } else if(prod.lot){
         lotOpts = '<option value="'+prod.lot+'" selected>'+prod.lot+' ✓</option>';
       }
     }
   }
 
+  // Availability hints
+  var invAvail = '';
+  if(invSrcKey){var pp=S.inv[+invSrcKey.split(':')[1]];if(pp)invAvail=N(pp.qty)+' '+pp.unit+' available';}
+  var pktAvail = '';
+  if(pktSrcKey){var pk=S.pkt[+pktSrcKey.split(':')[1]];if(pk)pktAvail=N(pk.qty)+' '+pk.unit+' available';}
+
   return '<div id="ord-row-'+i+'" style="background:var(--S2);border:1px solid var(--bd);border-radius:var(--R);padding:12px;margin-bottom:8px">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
-    +'<div style="font-size:11px;font-weight:600;color:var(--hx)">ITEM '+(i+1)+'</div>'
+    // Row header
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
+    +'<div style="font-size:11px;font-weight:600;color:var(--hx);text-transform:uppercase;letter-spacing:.8px">Item '+(i+1)+'</div>'
     +(i>0?'<button class="btn xs dn" onclick="removeOrderItemRow('+i+')">✕ Remove</button>':'')
     +'</div>'
-    // Row 1: Product column + Packet column
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'
-    +'<div class="fg"><label class="fl" style="color:var(--g2)">📦 Product (from Inventory)</label>'
-    +'<select class="fi" id="oi-inv-'+i+'" onchange="onOrdInvChange('+i+');updateOrderTotal()">'
+    // ── PRODUCT + PACKET side by side
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">'
+    // Left: Product
+    +'<div style="background:var(--S);border:1px solid var(--bd);border-radius:var(--R);padding:10px">'
+    +'<div style="font-size:10.5px;font-weight:700;color:var(--g2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px">📦 Product (Inventory)</div>'
+    +'<div class="fg" style="margin-bottom:6px"><label class="fl" style="font-size:11px">Select Product</label>'
+    +'<select class="fi" id="oi-inv-'+i+'" onchange="onOrdInvChange('+i+');updateOrderTotal()" style="font-size:12px">'
     +invOpts
-    +'</select></div>'
-    +'<div class="fg"><label class="fl" style="color:var(--b2)">🗂 Packet (from Packets)</label>'
-    +'<select class="fi" id="oi-pkt-'+i+'" onchange="onOrdPktChange('+i+');updateOrderTotal()">'
+    +'</select>'
+    +(invAvail?'<div style="font-size:10.5px;color:var(--at);margin-top:2px">'+invAvail+'</div>':'')
+    +'</div>'
+    +'<div class="fg" style="margin-bottom:6px"><label class="fl" style="font-size:11px">Lot Number</label>'
+    +'<select class="fi" id="oi-lot-'+i+'" style="font-size:12px;font-family:monospace">'+lotOpts+'</select></div>'
+    +'<div class="fg"><label class="fl" style="font-size:11px">Product Qty ('+( invSrcKey&&S.inv[+invSrcKey.split(':')[1]]?S.inv[+invSrcKey.split(':')[1]].unit:'—')+')</label>'
+    +'<input class="fi" id="oi-inv-qty-'+i+'" type="number" min="0" step="0.001" value="'+(invQty||'')+'" placeholder="0" oninput="updateOrderTotal()" style="font-size:13px;font-weight:600"></div>'
+    +'</div>'
+    // Right: Packet
+    +'<div style="background:var(--S);border:1px solid var(--bd);border-radius:var(--R);padding:10px">'
+    +'<div style="font-size:10.5px;font-weight:700;color:var(--b2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px">🗂 Packet (Packet Stock)</div>'
+    +'<div class="fg" style="margin-bottom:6px"><label class="fl" style="font-size:11px">Select Packet</label>'
+    +'<select class="fi" id="oi-pkt-'+i+'" onchange="onOrdPktChange('+i+');updateOrderTotal()" style="font-size:12px">'
     +pktOpts
-    +'</select></div>'
+    +'</select>'
+    +(pktAvail?'<div style="font-size:10.5px;color:var(--at);margin-top:2px">'+pktAvail+'</div>':'')
     +'</div>'
-    // Row 2: Lot (for product) | Qty | Unit | Price
-    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">'
-    +'<div class="fg" id="oi-lot-wrap-'+i+'"><label class="fl">Lot Number</label>'
-    +'<select class="fi" id="oi-lot-'+i+'">'
-    +lotOpts
-    +'</select></div>'
-    +'<div class="fg"><label class="fl">Qty</label>'
-    +'<input class="fi" id="oi-qty-'+i+'" type="number" min="1" value="'+qty+'" placeholder="0" oninput="updateOrderTotal()"></div>'
-    +'<div class="fg"><label class="fl">Unit</label>'
-    +'<input class="fi" id="oi-unit-'+i+'" readonly placeholder="—" value="'+(item?item.unit||'':'')+'"></div>'
-    +'<div class="fg"><label class="fl">Unit Price (₹)</label>'
-    +'<input class="fi" id="oi-price-'+i+'" type="number" min="0" value="'+price+'" placeholder="0" oninput="updateOrderTotal()"></div>'
+    +'<div class="fg" style="margin-bottom:6px"><label class="fl" style="font-size:11px">&nbsp;</label>'
+    +'<div style="height:36px;display:flex;align-items:center;font-size:11px;color:var(--hx);padding:0 4px">'
+    +'Select a packet above to fill quantity</div></div>'
+    +'<div class="fg"><label class="fl" style="font-size:11px">Packet Qty ('+(pktSrcKey&&S.pkt[+pktSrcKey.split(':')[1]]?S.pkt[+pktSrcKey.split(':')[1]].unit:'—')+')</label>'
+    +'<input class="fi" id="oi-pkt-qty-'+i+'" type="number" min="0" step="1" value="'+(pktQty||'')+'" placeholder="0" oninput="updateOrderTotal()" style="font-size:13px;font-weight:600"></div>'
+    +'</div></div>'
+    // ── Price + total row
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+    +'<div class="fg"><label class="fl">Unit Price (₹) — for this item row</label>'
+    +'<input class="fi" id="oi-price-'+i+'" type="number" min="0" value="'+(price||'')+'" placeholder="0" oninput="updateOrderTotal()"></div>'
+    +'<div class="fg"><label class="fl">Row Value</label>'
+    +'<input class="fi" id="oi-val-'+i+'" readonly placeholder="—" style="color:var(--g2);font-weight:600"></div>'
     +'</div>'
-    // Stock preview
     +'<div id="oi-prev-'+i+'" style="margin-top:6px"></div>'
     +'</div>';
 }
+
+// onOrdInvChange — refresh lot dropdown + inv qty label + stock preview
+function onOrdInvChange(i){
+  var invSel = document.getElementById('oi-inv-'+i);
+  if(!invSel) return;
+  var src = invSel.value;
+  var lotSel  = document.getElementById('oi-lot-'+i);
+  var prevEl  = document.getElementById('oi-prev-'+i);
+  var invQtyEl= document.getElementById('oi-inv-qty-'+i);
+  if(!src){
+    if(lotSel) lotSel.innerHTML='<option value="">— Lot —</option>';
+    return;
+  }
+  var prod = S.inv[+src.split(':')[1]];
+  if(!prod) return;
+  // Update lot dropdown
+  var lg = S.lot.find(function(l){ return l.name===prod.name; });
+  var lopts = '';
+  if(lg){
+    lopts = lg.lots.slice().reverse().map(function(lt){
+      var ld=(lg.lotDates||{})[lt]||{};
+      var tag=lt===lg.current?' ✓ Current':'';
+      var qtag=ld.receivedQty?' ('+N(ld.receivedQty)+' '+(ld.receivedUnit||prod.unit)+')':'';
+      return '<option value="'+lt+'" '+(lt===lg.current?'selected':'')+'>'+lt+tag+qtag+'</option>';
+    }).join('');
+  } else {
+    lopts = '<option value="'+prod.lot+'" selected>'+prod.lot+' ✓</option>';
+  }
+  if(lotSel) lotSel.innerHTML = lopts;
+  // Update qty label with unit
+  if(invQtyEl){
+    var label=invQtyEl.previousElementSibling;
+    if(label) label.textContent='Product Qty ('+prod.unit+')';
+  }
+  // Stock preview
+  if(prevEl){
+    var avail=N(prod.qty)+' '+prod.unit;
+    prevEl.innerHTML='<div style="font-size:11px;color:var(--hx)">Product available: <strong style="color:var(--at)">'+avail+'</strong></div>';
+  }
+  updateOrderTotal();
+}
+
+// onOrdPktChange — refresh pkt qty label + stock preview
+function onOrdPktChange(i){
+  var pktSel = document.getElementById('oi-pkt-'+i);
+  if(!pktSel) return;
+  var src = pktSel.value;
+  var pktQtyEl = document.getElementById('oi-pkt-qty-'+i);
+  var prevEl   = document.getElementById('oi-prev-'+i);
+  if(!src){
+    if(pktQtyEl){var lbl=pktQtyEl.previousElementSibling;if(lbl)lbl.textContent='Packet Qty (—)';}
+    return;
+  }
+  var pkt = S.pkt[+src.split(':')[1]];
+  if(!pkt) return;
+  if(pktQtyEl){
+    var lbl=pktQtyEl.previousElementSibling;
+    if(lbl) lbl.textContent='Packet Qty ('+pkt.unit+')';
+  }
+  if(prevEl){
+    var avail=N(pkt.qty)+' '+pkt.unit;
+    var existing=prevEl.innerHTML;
+    // Append packet info without overwriting product info
+    if(existing.indexOf('pkt-avail')>=0){
+      prevEl.innerHTML=existing.replace(/<span id="pkt-avail[^"]*">[^<]*<\/span>/,'<span id="pkt-avail-'+i+'">Packet available: <strong style="color:var(--b2)">'+avail+'</strong></span>');
+    } else {
+      prevEl.innerHTML=(existing||'')+'<span id="pkt-avail-'+i+'" style="font-size:11px;color:var(--hx);margin-left:10px">Packet available: <strong style="color:var(--b2)">'+avail+'</strong></span>';
+    }
+  }
+  updateOrderTotal();
+}
+
 
 function onOrdInvChange(i){
   var invSel = document.getElementById('oi-inv-'+i);
@@ -2343,15 +2440,21 @@ function updateOrderTotal(){
   for(var i=0;i<(window._ordRowCount||1);i++){
     var el=document.getElementById("ord-row-"+i);
     if(!el)continue;
-    var qty=parseFloat((document.getElementById("oi-qty-"+i)||{value:0}).value)||0;
-    var price=parseFloat((document.getElementById("oi-price-"+i)||{value:0}).value)||0;
-    totalVal+=qty*price;
+    var invQty =parseFloat((document.getElementById("oi-inv-qty-"+i)||{value:0}).value)||0;
+    var pktQty =parseFloat((document.getElementById("oi-pkt-qty-"+i)||{value:0}).value)||0;
+    var price  =parseFloat((document.getElementById("oi-price-"+i)||{value:0}).value)||0;
+    var rowQty = invQty + pktQty; // combined qty for value calc
+    var rowVal = rowQty * price;
+    totalVal  += rowVal;
+    var valEl = document.getElementById("oi-val-"+i);
+    if(valEl) valEl.value = rowQty>0&&price>0 ? "₹"+N(rowVal) : "";
   }
   var el=document.getElementById("ord-total-row");
   if(el&&totalVal>0){
     el.innerHTML='<div class="pbox" style="margin-top:6px"><span style="color:var(--hx)">Order Total</span><span style="font-family:DM Mono,monospace;font-weight:600;color:var(--g2)">₹'+N(totalVal)+'</span></div>';
   } else if(el){el.innerHTML="";}
 }
+
 
 window.today=function(){return new Date().toISOString().split("T")[0];};
 
@@ -2974,51 +3077,128 @@ function saveOrder(idx){
   if(!cust){toast("Customer name required","warn");return;}
   if(cust.length>200){toast("Customer name too long","warn");return;}
 
-  // Collect items from all rows
-  var items=[];
-  var totalVal=0;
+  // ── Collect items — each row can have BOTH a product AND a packet
+  var items=[],totalVal=0,errors=[];
   for(var i=0;i<(window._ordRowCount||1);i++){
     var rowEl=document.getElementById("ord-row-"+i);
     if(!rowEl)continue;
-    // Determine if product or packet was selected
-    var invVal=(document.getElementById("oi-inv-"+i)||{value:""}).value;
-    var pktVal=(document.getElementById("oi-pkt-"+i)||{value:""}).value;
-    var srcKey=invVal||pktVal;
-    var selLot=(document.getElementById("oi-lot-"+i)||{value:""}).value;
-    var qty=parseFloat((document.getElementById("oi-qty-"+i)||{value:0}).value)||0;
-    var price=parseFloat((document.getElementById("oi-price-"+i)||{value:0}).value)||0;
-    if(!srcKey||!qty)continue;
-    var parts=srcKey.split(":");
-    var ref=null,pName="",pLot="",pType="",unit="",orderType="";
-    if(parts[0]==="inv"&&S.inv[+parts[1]]){ref=S.inv[+parts[1]];pName=ref.name;pLot=selLot||ref.lot;unit=ref.unit;orderType="product";}
-    else if(parts[0]==="pkt"&&S.pkt[+parts[1]]){ref=S.pkt[+parts[1]];pName=ref.name;pType=ref.type;unit=ref.unit;orderType="packet";}
-    if(!ref){toast("Invalid selection in item "+(i+1),"warn");return;}
-    // If editing, restore original qty for this item first
-    var origQty=0;
-    if(idx!=null&&S.ord[idx]&&S.ord[idx].items){
-      var origItem=S.ord[idx].items[items.length];
-      if(origItem&&origItem.srcKey===srcKey)origQty=origItem.qty;
-    }
-    var avail=ref.qty+origQty;
-    if(qty>avail){toast("⚠ Item "+(i+1)+": Only "+N(avail)+" "+unit+" available for "+pName,"warn");return;}
-    items.push({srcKey:srcKey,product:pName,lot:pLot,pktType:pType,orderType:orderType,qty:qty,unit:unit,price:price,value:qty*price,stockAfter:avail-qty});
-    totalVal+=qty*price;
-  }
-  if(!items.length){toast("Add at least one item with product and quantity","warn");return;}
+    var invVal  =(document.getElementById("oi-inv-"+i)||{value:""}).value;
+    var pktVal  =(document.getElementById("oi-pkt-"+i)||{value:""}).value;
+    var invQty  =parseFloat((document.getElementById("oi-inv-qty-"+i)||{value:0}).value)||0;
+    var pktQty  =parseFloat((document.getElementById("oi-pkt-qty-"+i)||{value:0}).value)||0;
+    var selLot  =(document.getElementById("oi-lot-"+i)||{value:""}).value;
+    var price   =parseFloat((document.getElementById("oi-price-"+i)||{value:0}).value)||0;
 
-  // Deduct stock for all items
+    if(!invVal&&!pktVal) continue; // empty row
+    if(invQty<=0&&pktQty<=0){
+      if(invVal||pktVal) errors.push("Row "+(i+1)+": enter at least one quantity");
+      continue;
+    }
+
+    // ── Product part of this row
+    if(invVal&&invQty>0){
+      var parts=invVal.split(":");
+      var ref=S.inv[+parts[1]];
+      if(!ref){errors.push("Row "+(i+1)+" product: invalid");continue;}
+      // Restore original qty if editing this item
+      var origInvQty=0;
+      if(idx!=null&&S.ord[idx]&&S.ord[idx].items){
+        S.ord[idx].items.forEach(function(oi){if(oi.invSrcKey===invVal&&oi.product===ref.name)origInvQty=oi.invQty||0;});
+      }
+      var avail=ref.qty+origInvQty;
+      if(invQty>avail){errors.push("Row "+(i+1)+" product: only "+N(avail)+" "+ref.unit+" of "+ref.name+" available");continue;}
+      items.push({
+        invSrcKey:invVal, pktSrcKey:pktVal||"",
+        product:ref.name, lot:selLot||ref.lot,
+        pktType:pktVal?(S.pkt[+pktVal.split(':')[1]]||{}).type||"":"",
+        orderType:"product+packet",
+        invQty:invQty, invUnit:ref.unit,
+        pktQty:pktVal&&pktQty>0?pktQty:0,
+        pktUnit:pktVal?(S.pkt[+pktVal.split(':')[1]]||{}).unit||"":"",
+        qty:invQty, unit:ref.unit, // primary qty for legacy compat
+        price:price, value:(invQty+pktQty)*price,
+        stockAfter:avail-invQty
+      });
+      totalVal+=(invQty+(pktQty>0?pktQty:0))*price;
+    } else if(pktVal&&pktQty>0&&!invVal){
+      // Packet-only row
+      var parts=pktVal.split(":");
+      var ref=S.pkt[+parts[1]];
+      if(!ref){errors.push("Row "+(i+1)+" packet: invalid");continue;}
+      var origPktQty=0;
+      if(idx!=null&&S.ord[idx]&&S.ord[idx].items){
+        S.ord[idx].items.forEach(function(oi){if(oi.pktSrcKey===pktVal)origPktQty=oi.pktQty||0;});
+      }
+      var pavail=ref.qty+origPktQty;
+      if(pktQty>pavail){errors.push("Row "+(i+1)+" packet: only "+N(pavail)+" "+ref.unit+" of "+ref.name+" available");continue;}
+      items.push({
+        invSrcKey:"", pktSrcKey:pktVal,
+        product:ref.name, lot:"", pktType:ref.type,
+        orderType:"packet",
+        invQty:0, invUnit:"",
+        pktQty:pktQty, pktUnit:ref.unit,
+        qty:pktQty, unit:ref.unit,
+        price:price, value:pktQty*price,
+        stockAfter:pavail-pktQty
+      });
+      totalVal+=pktQty*price;
+    }
+    // If both invVal and pktVal are set but invQty=0, add packet portion separately
+    if(invVal&&pktVal&&pktQty>0&&invQty<=0){
+      var pp=S.pkt[+pktVal.split(':')[1]];
+      if(pp){
+        var origPQ=0;
+        if(idx!=null&&S.ord[idx]&&S.ord[idx].items){
+          S.ord[idx].items.forEach(function(oi){if(oi.pktSrcKey===pktVal)origPQ=oi.pktQty||0;});
+        }
+        var pav=pp.qty+origPQ;
+        if(pktQty<=pav){
+          // Merge into last item or add separately
+          if(items.length&&items[items.length-1].invSrcKey===invVal){
+            items[items.length-1].pktSrcKey=pktVal;
+            items[items.length-1].pktQty=pktQty;
+            items[items.length-1].pktUnit=pp.unit;
+            items[items.length-1].pktType=pp.type;
+          }
+        }
+      }
+    }
+  }
+
+  if(errors.length){toast("⚠ "+errors.slice(0,3).join(" | "),"warn");return;}
+  if(!items.length){toast("Add at least one item with a product or packet and quantity","warn");return;}
+
+  // ── Restore original stock if editing (before deducting new)
+  if(idx!=null&&S.ord[idx]&&S.ord[idx].items){
+    S.ord[idx].items.forEach(function(oi){
+      if(oi.invSrcKey){var r=S.inv[+oi.invSrcKey.split(':')[1]];if(r)r.qty=Math.round((r.qty+(oi.invQty||oi.qty||0))*1000)/1000;}
+      if(oi.pktSrcKey){var r=S.pkt[+oi.pktSrcKey.split(':')[1]];if(r)r.qty=Math.round((r.qty+(oi.pktQty||(!oi.invSrcKey?oi.qty:0)||0))*1000)/1000;}
+      if(oi.unit==="kg"||oi.invUnit==="kg"){var pt=S.pattri.find(function(p){return p.name===oi.product;});if(pt)pt.netWeight=Math.max(0,Math.round(((pt.netWeight||0)+(oi.invQty||oi.qty||0))*1000)/1000);}
+    });
+    // Restore box stock
+    if(S.ord[idx].boxType&&S.ord[idx].boxQty>0){
+      var ob=S.boxes.find(function(b){return b.name===S.ord[idx].boxType;});
+      if(ob)ob.qty+=S.ord[idx].boxQty;
+    }
+  }
+
+  // ── Deduct stock for all items
   items.forEach(function(it){
-    var parts=it.srcKey.split(":");
-    if(parts[0]==="inv"){S.inv[+parts[1]].qty-=it.qty;}
-    else if(parts[0]==="pkt"){S.pkt[+parts[1]].qty-=it.qty;}
-    // Auto-deduct pattri net weight (for kg products)
-    if(it.unit==="kg"){
-      var pt=S.pattri.find(function(p){return p.name===it.product;});
-      if(pt){pt.netWeight=Math.max(0,(pt.netWeight||0)-it.qty);pt.netWeight=Math.round(pt.netWeight*1000)/1000;}
+    if(it.invSrcKey&&it.invQty>0){
+      var r=S.inv[+it.invSrcKey.split(':')[1]];
+      if(r){r.qty=Math.max(0,Math.round((r.qty-it.invQty)*1000)/1000);}
+      if(it.invUnit==="kg"||it.unit==="kg"){
+        var pt=S.pattri.find(function(p){return p.name===it.product;});
+        if(pt){pt.netWeight=Math.max(0,Math.round(((pt.netWeight||0)-it.invQty)*1000)/1000);}
+      }
+    }
+    if(it.pktSrcKey&&it.pktQty>0){
+      var r=S.pkt[+it.pktSrcKey.split(':')[1]];
+      if(r){r.qty=Math.max(0,Math.round((r.qty-it.pktQty)*1000)/1000);}
     }
   });
 
-  // Box stock deduction
+  // ── Box stock deduction
   var boxIdx=(document.getElementById("m-box-type")||{value:""}).value;
   var boxQty=parseFloat((document.getElementById("m-box-qty")||{value:0}).value)||0;
   var boxName="";
@@ -3027,15 +3207,17 @@ function saveOrder(idx){
     if(boxQty>bref.qty){toast("⚠ Not enough boxes — only "+N(bref.qty)+" "+bref.name+" available","warn");return;}
     bref.qty=Math.max(0,bref.qty-boxQty);
     boxName=bref.name;
-    logMove("out","Box: "+bref.name,boxQty,"box",idx==null?"ORD-"+String(S.seq).padStart(4,"0"):S.ord[idx].id,"Order box usage");
   }
 
   var ordId=ordIdInput||(idx==null?"ORD-"+String(S.seq).padStart(4,"0"):S.ord[idx].id);
-  // Log movements for all items
+  // ── Log movements
   items.forEach(function(it){
-    logMove("out",it.product,it.qty,it.unit,ordId,"Customer Order — "+cust);
+    if(it.invQty>0) logMove("out",it.product,it.invQty,it.invUnit||it.unit,ordId,"Customer Order — "+cust+(it.lot?" lot "+it.lot:""));
+    if(it.pktQty>0) logMove("out",it.product+" (pkt)",it.pktQty,it.pktUnit||it.unit,ordId,"Customer Order (packet) — "+cust);
   });
+  if(boxName) logMove("out","Box: "+boxName,boxQty,"box",ordId,"Order box usage");
 
+  // ── Build order record
   var o={id:ordId,customer:cust,items:items,
     orderType:items[0].orderType,product:items[0].product,lot:items[0].lot,pktType:items[0].pktType,
     qty:items.reduce(function(a,it){return a+it.qty;},0),unit:items[0].unit,
@@ -3050,55 +3232,64 @@ function saveOrder(idx){
   logHistory(idx==null?"place_order":"edit_order",cust,"Order="+ordId+", items="+items.length+", value=₹"+N(totalVal));
   if(idx==null){S.ord.push(o);S.seq++;}else S.ord[idx]=o;
   closeM();schedSave();render();
-  toast(idx==null?ordId+" placed — "+items.length+" item(s) deducted ✓":ordId+" updated ✓","ok");
+  toast(idx==null?ordId+" placed — "+items.length+" row(s) ✓":ordId+" updated ✓","ok");
 }
 
+
 function cancelOrder(i){
-  if(!confirm("Cancel order and restore all stock?"))return;
+  if(!confirm("Cancel this order and restore all stock?"))return;
   var o=S.ord[i];
-  if(o.status==="cancelled"){toast("Order already cancelled","info");return;}
-  // Restore all items
-  var itemList=o.items||[{srcKey:(o.orderType==="packet"?"pkt":"inv")+":0",product:o.product,lot:o.lot,pktType:o.pktType,orderType:o.orderType,qty:o.qty,unit:o.unit}];
+  if(o.status==="cancelled"){toast("Already cancelled","info");return;}
+  _pushUndo("Cancel order "+o.id,["ord","inv","pkt","boxes","pattri"]);
+
+  var itemList=o.items||[];
+  // Legacy single-item orders
+  if(!itemList.length){
+    if(o.orderType==="packet")  itemList=[{pktSrcKey:"",pktQty:o.qty,pktUnit:o.unit,product:o.product,pktType:o.pktType}];
+    else                        itemList=[{invSrcKey:"",invQty:o.qty,invUnit:o.unit,product:o.product,lot:o.lot,unit:o.unit}];
+  }
+
   itemList.forEach(function(it){
-    var parts=(it.srcKey||"").split(":");
-    if(parts[0]==="inv"){
-      // Try to find by index first (most reliable), then by name+lot
-      var invRef=parts[1]!=null&&S.inv[+parts[1]]?S.inv[+parts[1]]:S.inv.find(function(r){return r.name===it.product&&r.lot===it.lot;});
-      if(!invRef) invRef=S.inv.find(function(r){return r.name===it.product;}); // fallback: any matching product
-      if(invRef){invRef.qty=Math.round((invRef.qty+it.qty)*1000)/1000;}
-      // Restore pattri net weight
-      if(it.unit==="kg"){
-        var pt=S.pattri.find(function(p){return p.name===it.product;});
-        if(pt){pt.netWeight=Math.max(0,Math.round(((pt.netWeight||0)+it.qty)*1000)/1000);}
+    // ── Restore inventory product stock
+    var invQty = it.invQty || (!it.pktSrcKey ? it.qty : 0) || 0;
+    if(invQty>0){
+      var invRef = it.invSrcKey
+        ? S.inv[+it.invSrcKey.split(':')[1]]
+        : (S.inv.find(function(r){return r.name===it.product&&r.lot===it.lot;})||S.inv.find(function(r){return r.name===it.product;}));
+      if(invRef){
+        invRef.qty=Math.round((invRef.qty+invQty)*1000)/1000;
+        logMove("in",invRef.name,invQty,it.invUnit||it.unit||invRef.unit,o.id,"Order Cancelled — stock restored");
       }
-    } else if(parts[0]==="pkt"){
-      var pktRef=parts[1]!=null&&S.pkt[+parts[1]]?S.pkt[+parts[1]]:S.pkt.find(function(r){return r.name===it.product&&r.type===it.pktType;});
-      if(pktRef) pktRef.qty=Math.round((pktRef.qty+it.qty)*1000)/1000;
-    } else {
-      // Legacy order without srcKey — restore by product name+lot
-      if(o.orderType==="packet"){
-        var legRef=S.pkt.find(function(r){return r.name===o.product&&r.type===o.pktType;});
-        if(legRef) legRef.qty=Math.round((legRef.qty+o.qty)*1000)/1000;
-      } else {
-        var legRef=S.inv.find(function(r){return r.name===o.product&&r.lot===o.lot;})||S.inv.find(function(r){return r.name===o.product;});
-        if(legRef){
-          legRef.qty=Math.round((legRef.qty+o.qty)*1000)/1000;
-          if(o.unit==="kg"){var ptLeg=S.pattri.find(function(p){return p.name===o.product;});if(ptLeg)ptLeg.netWeight=Math.max(0,Math.round(((ptLeg.netWeight||0)+o.qty)*1000)/1000);}
-        }
+      // Restore pattri
+      var invUnit=it.invUnit||it.unit||"";
+      if(invUnit==="kg"||invUnit==="litre"){
+        var pt=S.pattri.find(function(p){return p.name===it.product;});
+        if(pt)pt.netWeight=Math.max(0,Math.round(((pt.netWeight||0)+invQty)*1000)/1000);
       }
     }
-    logMove("in",it.product,it.qty,it.unit,o.id,"Order Cancelled — stock restored");
+    // ── Restore packet stock
+    var pktQty = it.pktQty || (it.orderType==="packet"?it.qty:0) || 0;
+    if(pktQty>0){
+      var pktRef = it.pktSrcKey
+        ? S.pkt[+it.pktSrcKey.split(':')[1]]
+        : S.pkt.find(function(r){return r.name===it.product&&r.type===it.pktType;});
+      if(pktRef){
+        pktRef.qty=Math.round((pktRef.qty+pktQty)*1000)/1000;
+        logMove("in",pktRef.name+" (pkt)",pktQty,it.pktUnit||pktRef.unit,o.id,"Order Cancelled — packet stock restored");
+      }
+    }
   });
+
   // Restore box stock
   if(o.boxType&&o.boxQty>0){
     var bref=S.boxes.find(function(b){return b.name===o.boxType;});
-    if(bref)bref.qty+=o.boxQty;
-    logMove("in","Box: "+o.boxType,o.boxQty,"box",o.id,"Order Cancelled — boxes restored");
+    if(bref){bref.qty+=o.boxQty;logMove("in","Box: "+o.boxType,o.boxQty,"box",o.id,"Order Cancelled — boxes restored");}
   }
   o.status="cancelled";
-  logHistory("cancel_order",o.customer,"Order="+o.id+" cancelled, stock restored");
-  schedSave();render();toast("Order "+o.id+" cancelled — all stock restored ✓","info");
+  logHistory("cancel_order",o.customer,"Order="+o.id+" cancelled, all stock restored");
+  schedSave();render();toast("Order "+o.id+" cancelled — stock fully restored ✓","info");
 }
+
 
 
 function saveVendor(idx){
@@ -4110,7 +4301,7 @@ function openBulkOrderModal(){
   var rowCount=5;
   var rows="";
   for(var i=0;i<rowCount;i++){
-    rows+=buildBulkOrderRow(i,allOpts);
+    rows+=buildBulkOrderRow(i);
   }
 
   openM('<div class="modal lg">'
@@ -4166,16 +4357,14 @@ function openBulkOrderModal(){
     +'<button class="btn xs te" onclick="updateBulkOrderTotal()">🔄 Refresh</button>'
     +'</div></div>'
     +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">'
-    +'<table style="width:100%;border-collapse:collapse;min-width:680px" id="bo-table">'
+    +'<table style="width:100%;border-collapse:collapse;min-width:600px" id="bo-table">'
     +'<thead><tr style="background:var(--S3)">'
-    +'<th style="padding:8px 6px;text-align:left;font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;width:32px">#</th>'
-    +'<th style="padding:8px 6px;text-align:left;font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px">Product / Packet</th>'
-    +'<th style="padding:8px 6px;text-align:left;font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;width:90px">Qty</th>'
-    +'<th style="padding:8px 6px;text-align:left;font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;width:65px">Unit</th>'
-    +'<th style="padding:8px 6px;text-align:left;font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;width:90px">Price (₹)</th>'
-    +'<th style="padding:8px 6px;text-align:left;font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;width:90px">Value (₹)</th>'
-    +'<th style="padding:8px 6px;text-align:left;font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;width:55px">Avail.</th>'
-    +'<th style="padding:8px 6px;width:30px"></th>'
+    +'<th style="padding:6px;text-align:left;font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;width:28px">#</th>'
+    +'<th style="padding:6px;text-align:left;font-size:10px;color:var(--g2);text-transform:uppercase;letter-spacing:.8px">📦 Product + Qty</th>'
+    +'<th style="padding:6px;text-align:left;font-size:10px;color:var(--b2);text-transform:uppercase;letter-spacing:.8px">🗂 Packet + Qty</th>'
+    +'<th style="padding:6px;text-align:left;font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;width:90px">Price (₹)</th>'
+    +'<th style="padding:6px;text-align:left;font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;width:85px">Value (₹)</th>'
+    +'<th style="padding:6px;width:28px"></th>'
     +'</tr></thead>'
     +'<tbody id="bo-tbody">'+rows+'</tbody>'
     +'</table></div>'
@@ -4191,20 +4380,51 @@ function openBulkOrderModal(){
   setTimeout(updateBulkOrderTotal, 60);
 }
 
-function buildBulkOrderRow(i,allOpts){
-  return '<tr id="bo-row-'+i+'" style="border-bottom:1px solid var(--bd)">'
-    +'<td style="padding:5px 4px;text-align:center;font-size:11px;color:var(--hx)">'+(i+1)+'</td>'
-    +'<td style="padding:4px"><select class="fi" id="bo-src-'+i+'" style="font-size:12px;padding:5px 7px" onchange="updateBulkOrderRow('+i+')">'
-    +(allOpts||buildBulkAllOpts())
-    +'</select></td>'
-    +'<td style="padding:4px"><input class="fi" id="bo-qty-'+i+'" type="number" min="1" placeholder="0" style="font-size:12px;padding:5px 7px" oninput="updateBulkOrderRow('+i+')"></td>'
-    +'<td style="padding:4px"><input class="fi" id="bo-unit-'+i+'" readonly style="font-size:12px;padding:5px 7px;color:var(--hx)" placeholder="—"></td>'
-    +'<td style="padding:4px"><input class="fi" id="bo-price-'+i+'" type="number" min="0" placeholder="0" style="font-size:12px;padding:5px 7px" oninput="updateBulkOrderRow('+i+')"></td>'
-    +'<td style="padding:4px"><input class="fi" id="bo-val-'+i+'" readonly style="font-size:12px;padding:5px 7px;color:var(--g2);font-weight:600" placeholder="—"></td>'
-    +'<td style="padding:4px"><input class="fi" id="bo-avail-'+i+'" readonly style="font-size:12px;padding:5px 7px;color:var(--hx)" placeholder="—"></td>'
-    +'<td style="padding:4px;text-align:center"><button class="btn xs dn" onclick="removeBulkOrderRow('+i+')" title="Remove row">✕</button></td>'
+function buildBulkOrderRow(i){
+  // Build product options
+  var invOpts='<option value="">— Product (optional) —</option>'+S.inv.map(function(r,j){
+    return '<option value="inv:'+j+'">'+r.name+' · '+r.lot+' ('+N(r.qty)+' '+r.unit+')</option>';
+  }).join('');
+  // Build packet options
+  var pktOpts='<option value="">— Packet (optional) —</option>'+S.pkt.map(function(r,j){
+    return '<option value="pkt:'+j+'">'+r.name+' ('+r.type+') · '+N(r.qty)+' '+r.unit+'</option>';
+  }).join('');
+
+  return '<tr id="bo-row-'+i+'">'
+    +'<td style="padding:4px 6px;text-align:center;font-size:11px;color:var(--hx);vertical-align:top;padding-top:12px">'+(i+1)+'</td>'
+    // Product cell
+    +'<td style="padding:4px;vertical-align:top;min-width:180px">'
+    +'<div style="font-size:9.5px;font-weight:700;color:var(--g2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">📦 Product</div>'
+    +'<select class="fi" id="bo-inv-'+i+'" style="font-size:11.5px;padding:4px 6px;margin-bottom:4px" onchange="updateBulkOrderRow('+i+')">'
+    +invOpts+'</select>'
+    +'<input class="fi" id="bo-inv-qty-'+i+'" type="number" min="0" step="0.001" placeholder="Qty" style="font-size:11.5px;padding:4px 6px" oninput="updateBulkOrderRow('+i+')">'
+    +'<div id="bo-inv-avail-'+i+'" style="font-size:10px;color:var(--at);margin-top:2px"></div>'
+    +'</td>'
+    // Packet cell
+    +'<td style="padding:4px;vertical-align:top;min-width:180px">'
+    +'<div style="font-size:9.5px;font-weight:700;color:var(--b2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">🗂 Packet</div>'
+    +'<select class="fi" id="bo-pkt-'+i+'" style="font-size:11.5px;padding:4px 6px;margin-bottom:4px" onchange="updateBulkOrderRow('+i+')">'
+    +pktOpts+'</select>'
+    +'<input class="fi" id="bo-pkt-qty-'+i+'" type="number" min="0" step="1" placeholder="Qty" style="font-size:11.5px;padding:4px 6px" oninput="updateBulkOrderRow('+i+')">'
+    +'<div id="bo-pkt-avail-'+i+'" style="font-size:10px;color:var(--b2);margin-top:2px"></div>'
+    +'</td>'
+    // Price cell
+    +'<td style="padding:4px;vertical-align:top;min-width:90px">'
+    +'<div style="font-size:9.5px;font-weight:700;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">Price ₹</div>'
+    +'<input class="fi" id="bo-price-'+i+'" type="number" min="0" placeholder="0" style="font-size:11.5px;padding:4px 6px" oninput="updateBulkOrderRow('+i+')">'
+    +'</td>'
+    // Value cell
+    +'<td style="padding:4px;vertical-align:top;min-width:80px">'
+    +'<div style="font-size:9.5px;font-weight:700;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">Value ₹</div>'
+    +'<input class="fi" id="bo-val-'+i+'" readonly style="font-size:11.5px;padding:4px 6px;color:var(--g2);font-weight:600">'
+    +'</td>'
+    // Remove
+    +'<td style="padding:4px;vertical-align:top;padding-top:14px">'
+    +'<button class="btn xs dn" onclick="removeBulkOrderRow('+i+')" title="Remove">✕</button>'
+    +'</td>'
     +'</tr>';
 }
+
 
 function buildBulkAllOpts(){
   var invOpts='<option value="">— Select —</option>'+S.inv.map(function(r,i){
@@ -4223,7 +4443,7 @@ function addBulkOrderRow(){
   var tr=document.createElement("tr");
   tr.id="bo-row-"+i;
   tr.style.borderBottom="1px solid var(--bd)";
-  tr.innerHTML=buildBulkOrderRow(i,buildBulkAllOpts()).replace(/^<tr[^>]*>/,"").replace(/<\/tr>$/,"");
+  tr.innerHTML=buildBulkOrderRow(i).replace(/^<tr[^>]*>/,"").replace(/<\/tr>$/,"");
   tbody.appendChild(tr);
   updateBulkOrderTotal();
 }
@@ -4235,57 +4455,66 @@ function removeBulkOrderRow(i){
 }
 
 function updateBulkOrderRow(i){
-  var src=(document.getElementById("bo-src-"+i)||{value:""}).value;
-  var qtyEl=document.getElementById("bo-qty-"+i);
-  var unitEl=document.getElementById("bo-unit-"+i);
-  var priceEl=document.getElementById("bo-price-"+i);
-  var valEl=document.getElementById("bo-val-"+i);
-  var availEl=document.getElementById("bo-avail-"+i);
-  if(!unitEl)return;
+  var invSrc =(document.getElementById("bo-inv-"+i)||{value:""}).value;
+  var pktSrc =(document.getElementById("bo-pkt-"+i)||{value:""}).value;
+  var invQty =parseFloat((document.getElementById("bo-inv-qty-"+i)||{value:0}).value)||0;
+  var pktQty =parseFloat((document.getElementById("bo-pkt-qty-"+i)||{value:0}).value)||0;
+  var price  =parseFloat((document.getElementById("bo-price-"+i)||{value:0}).value)||0;
+  var invAvailEl=document.getElementById("bo-inv-avail-"+i);
+  var pktAvailEl=document.getElementById("bo-pkt-avail-"+i);
+  var valEl  =document.getElementById("bo-val-"+i);
+  var invInpEl =document.getElementById("bo-inv-qty-"+i);
+  var pktInpEl =document.getElementById("bo-pkt-qty-"+i);
 
-  if(!src){unitEl.value="";if(availEl)availEl.value="";if(valEl)valEl.value="";return;}
-  var parts=src.split(":");
-  var ref=null;
-  if(parts[0]==="inv"&&S.inv[+parts[1]])ref=S.inv[+parts[1]];
-  else if(parts[0]==="pkt"&&S.pkt[+parts[1]])ref=S.pkt[+parts[1]];
-  if(!ref)return;
+  // Product availability
+  if(invSrc&&invAvailEl){
+    var ref=S.inv[+invSrc.split(':')[1]];
+    if(ref){
+      invAvailEl.textContent="Avail: "+N(ref.qty)+" "+ref.unit;
+      if(invInpEl)invInpEl.style.borderColor=invQty>ref.qty?"#ef4444":invQty>0?"#10b981":"";
+    }
+  } else if(invAvailEl){ invAvailEl.textContent=""; }
 
-  unitEl.value=ref.unit;
-  if(availEl)availEl.value=N(ref.qty)+" "+ref.unit;
+  // Packet availability
+  if(pktSrc&&pktAvailEl){
+    var ref=S.pkt[+pktSrc.split(':')[1]];
+    if(ref){
+      pktAvailEl.textContent="Avail: "+N(ref.qty)+" "+ref.unit;
+      if(pktInpEl)pktInpEl.style.borderColor=pktQty>ref.qty?"#ef4444":pktQty>0?"#10b981":"";
+    }
+  } else if(pktAvailEl){ pktAvailEl.textContent=""; }
 
-  // Highlight if over-stock
-  var qty=parseFloat((qtyEl||{value:0}).value)||0;
-  var price=parseFloat((priceEl||{value:0}).value)||0;
-  if(valEl)valEl.value=price&&qty?N(qty*price):"";
-  if(qtyEl){
-    qtyEl.style.borderColor=qty>ref.qty?"#ef4444":qty>0?"#10b981":"";
-  }
+  // Row value
+  var rowQty=(invSrc?invQty:0)+(pktSrc?pktQty:0);
+  if(valEl)valEl.value=rowQty>0&&price>0?"₹"+N(rowQty*price):"";
   updateBulkOrderTotal();
 }
+
 
 function updateBulkOrderTotal(){
   var total=0,itemCount=0;
   for(var i=0;i<(window._boRowCount||5);i++){
     var row=document.getElementById("bo-row-"+i);
     if(!row)continue;
-    var src=(document.getElementById("bo-src-"+i)||{value:""}).value;
-    var qty=parseFloat((document.getElementById("bo-qty-"+i)||{value:0}).value)||0;
-    var price=parseFloat((document.getElementById("bo-price-"+i)||{value:0}).value)||0;
-    if(src&&qty){total+=qty*price;itemCount++;}
-    // update val cell live
+    var invSrc=(document.getElementById("bo-inv-"+i)||{value:""}).value;
+    var pktSrc=(document.getElementById("bo-pkt-"+i)||{value:""}).value;
+    var invQty=parseFloat((document.getElementById("bo-inv-qty-"+i)||{value:0}).value)||0;
+    var pktQty=parseFloat((document.getElementById("bo-pkt-qty-"+i)||{value:0}).value)||0;
+    var price =parseFloat((document.getElementById("bo-price-"+i)||{value:0}).value)||0;
+    var rowQty=(invSrc?invQty:0)+(pktSrc?pktQty:0);
+    if((invSrc||pktSrc)&&rowQty>0){total+=rowQty*price;itemCount++;}
     var valEl=document.getElementById("bo-val-"+i);
-    if(valEl&&src&&qty&&price)valEl.value=N(qty*price);
+    if(valEl&&rowQty>0&&price>0)valEl.value="₹"+N(rowQty*price);
   }
   var bar=document.getElementById("bo-total-bar");
   if(bar){
     if(itemCount>0){
-      bar.innerHTML='<div class="pbox"><span style="color:var(--hx)">Items: <strong style="color:var(--tx)">'+itemCount+'</strong></span>'
+      bar.innerHTML='<div class="pbox"><span style="color:var(--hx)">Rows with items: <strong style="color:var(--tx)">'+itemCount+'</strong></span>'
         +(total>0?'<span style="color:var(--hx)">Order Total: <strong style="color:var(--g2)">₹'+N(total)+'</strong></span>':'')+'</div>';
-    } else {
-      bar.innerHTML="";
-    }
+    } else { bar.innerHTML=""; }
   }
 }
+
 
 function updateBulkBoxInfo(){
   var bIdx=(document.getElementById("bo-box-type")||{value:""}).value;
@@ -4325,80 +4554,86 @@ function saveBulkOrder(){
 
   if(!cust){toast("Customer name required","warn");return;}
   if(cust.length>200){toast("Customer name too long","warn");return;}
+  if(bIdx!==""&&bQty>0){var box=S.boxes[+bIdx];if(box&&bQty>box.qty){toast("⚠ Not enough boxes — only "+N(box.qty)+" available","warn");return;}}
 
-  // Validate box stock
-  if(bIdx!==""&&bQty>0){
-    var box=S.boxes[+bIdx];
-    if(box&&bQty>box.qty){toast("⚠ Not enough boxes — only "+N(box.qty)+" available","warn");return;}
-  }
-
-  var items=[],errors=[];
+  var items=[],errors=[],totalVal=0;
   for(var i=0;i<(window._boRowCount||5);i++){
     var row=document.getElementById("bo-row-"+i);
     if(!row)continue;
-    var src=(document.getElementById("bo-src-"+i)||{value:""}).value;
-    var qty=parseFloat((document.getElementById("bo-qty-"+i)||{value:0}).value)||0;
-    var price=parseFloat((document.getElementById("bo-price-"+i)||{value:0}).value)||0;
-    if(!src||!qty)continue;
-    var parts=src.split(":");
-    var ref=null,pName="",pLot="",pType="",unit="",orderType="";
-    if(parts[0]==="inv"&&S.inv[+parts[1]]){ref=S.inv[+parts[1]];pName=ref.name;pLot=ref.lot;unit=ref.unit;orderType="product";}
-    else if(parts[0]==="pkt"&&S.pkt[+parts[1]]){ref=S.pkt[+parts[1]];pName=ref.name;pType=ref.type;unit=ref.unit;orderType="packet";}
-    if(!ref){errors.push("Row "+(i+1)+": invalid selection");continue;}
-    if(qty>ref.qty){errors.push("Row "+(i+1)+": "+pName+" — only "+N(ref.qty)+" "+unit+" available, requested "+N(qty));continue;}
-    items.push({srcKey:src,product:pName,lot:pLot,pktType:pType,orderType:orderType,qty:qty,unit:unit,price:price,value:qty*price,stockAfter:ref.qty-qty});
+    var invSrc=(document.getElementById("bo-inv-"+i)||{value:""}).value;
+    var pktSrc=(document.getElementById("bo-pkt-"+i)||{value:""}).value;
+    var invQty=parseFloat((document.getElementById("bo-inv-qty-"+i)||{value:0}).value)||0;
+    var pktQty=parseFloat((document.getElementById("bo-pkt-qty-"+i)||{value:0}).value)||0;
+    var price =parseFloat((document.getElementById("bo-price-"+i)||{value:0}).value)||0;
+    if(!invSrc&&!pktSrc)continue;
+    if(invQty<=0&&pktQty<=0)continue;
+
+    var pName="",pLot="",pType="",invUnit="",pktUnit="";
+    var invRef=null,pktRef=null;
+    if(invSrc){invRef=S.inv[+invSrc.split(':')[1]];if(invRef){pName=invRef.name;pLot=invRef.lot;invUnit=invRef.unit;}}
+    if(pktSrc){pktRef=S.pkt[+pktSrc.split(':')[1]];if(pktRef){pType=pktRef.type;pktUnit=pktRef.unit;if(!pName)pName=pktRef.name;}}
+
+    if(invSrc&&!invRef){errors.push("Row "+(i+1)+": invalid product");continue;}
+    if(pktSrc&&!pktRef){errors.push("Row "+(i+1)+": invalid packet");continue;}
+    if(invRef&&invQty>invRef.qty){errors.push("Row "+(i+1)+": product "+pName+" — only "+N(invRef.qty)+" "+invUnit+" avail");continue;}
+    if(pktRef&&pktQty>pktRef.qty){errors.push("Row "+(i+1)+": packet "+pktRef.name+" — only "+N(pktRef.qty)+" "+pktUnit+" avail");continue;}
+
+    var rowQty=(invRef&&invQty>0?invQty:0)+(pktRef&&pktQty>0?pktQty:0);
+    var rowVal=rowQty*price;
+    items.push({
+      invSrcKey:invSrc,pktSrcKey:pktSrc,
+      product:pName,lot:pLot,pktType:pType,
+      orderType:invSrc&&pktSrc?"product+packet":invSrc?"product":"packet",
+      invQty:invRef&&invQty>0?invQty:0,invUnit:invUnit,
+      pktQty:pktRef&&pktQty>0?pktQty:0,pktUnit:pktUnit,
+      qty:rowQty,unit:invUnit||pktUnit,
+      price:price,value:rowVal,
+      stockAfter:invRef?invRef.qty-invQty:0
+    });
+    totalVal+=rowVal;
   }
 
-  if(errors.length){toast("⚠ "+errors.join(" | "),"warn");return;}
-  if(!items.length){toast("Add at least one item with product and quantity","warn");return;}
+  if(errors.length){toast("⚠ "+errors.slice(0,3).join(" | "),"warn");return;}
+  if(!items.length){toast("Add at least one item with product or packet and quantity","warn");return;}
 
-  // Deduct all item stock
-  var totalVal=items.reduce(function(a,it){return a+(it.value||0);},0);
+  // ── Deduct stock
   items.forEach(function(it){
-    var parts=it.srcKey.split(":");
-    if(parts[0]==="inv"){
-      S.inv[+parts[1]].qty-=it.qty;
-      if(it.unit==="kg"){
-        var pt=S.pattri.find(function(p){return p.name===it.product;});
-        if(pt){pt.netWeight=Math.max(0,(pt.netWeight||0)-it.qty);pt.netWeight=Math.round(pt.netWeight*1000)/1000;}
-      }
-    } else if(parts[0]==="pkt"){
-      S.pkt[+parts[1]].qty-=it.qty;
+    if(it.invSrcKey&&it.invQty>0){
+      var r=S.inv[+it.invSrcKey.split(':')[1]];
+      if(r)r.qty=Math.max(0,Math.round((r.qty-it.invQty)*1000)/1000);
+      if(it.invUnit==="kg"){var pt=S.pattri.find(function(p){return p.name===it.product;});if(pt){pt.netWeight=Math.max(0,Math.round(((pt.netWeight||0)-it.invQty)*1000)/1000);}}
     }
+    if(it.pktSrcKey&&it.pktQty>0){var r=S.pkt[+it.pktSrcKey.split(':')[1]];if(r)r.qty=Math.max(0,Math.round((r.qty-it.pktQty)*1000)/1000);}
   });
 
-  // Deduct box stock
-  var boxName="",boxTypeName="";
-  if(bIdx!==""&&bQty>0&&S.boxes[+bIdx]){
-    var bref=S.boxes[+bIdx];
-    bref.qty=Math.max(0,bref.qty-bQty);
-    boxName=bref.name;
-    boxTypeName=bref.name;
-    logMove("out","Box: "+bref.name,bQty,"box",ordId,"Bulk Order box usage");
-  }
+  // ── Box deduction
+  var boxName="";
+  if(bIdx!==""&&bQty>0&&S.boxes[+bIdx]){var bref=S.boxes[+bIdx];bref.qty=Math.max(0,bref.qty-bQty);boxName=bref.name;logMove("out","Box: "+bref.name,bQty,"box",ordId,"Bulk Order box usage");}
 
-  // Log movements
-  items.forEach(function(it){logMove("out",it.product,it.qty,it.unit,ordId,"Bulk Order — "+cust);});
+  // ── Log movements
+  items.forEach(function(it){
+    if(it.invQty>0)logMove("out",it.product,it.invQty,it.invUnit,ordId,"Bulk Order — "+cust);
+    if(it.pktQty>0)logMove("out",it.product+" (pkt)",it.pktQty,it.pktUnit,ordId,"Bulk Order packet — "+cust);
+  });
 
-  var o={
-    id:ordId,customer:cust,
-    items:items,
-    orderType:items[0].orderType,product:items[0].product,lot:items[0].lot,
-    pktType:items[0].pktType,qty:items.reduce(function(a,it){return a+it.qty;},0),
-    unit:items[0].unit,price:items[0].price,value:totalVal,
-    boxType:boxTypeName,boxQty:bQty,
+  var o={id:ordId,customer:cust,items:items,
+    orderType:items[0].orderType,product:items[0].product,lot:items[0].lot,pktType:items[0].pktType,
+    qty:items.reduce(function(a,it){return a+it.qty;},0),unit:items[0].unit,
+    price:items[0].price,value:totalVal,
+    boxType:boxName,boxQty:bQty,
     date:date,expiry:boExpiry,apptDate:boAppt,dispatchDate:boDispatch,
     fromLoc:boFrom,toLoc:boTo,
     pickupName:boPickupName,pickupPhone:boPickupPh,
     deliveryName:boDelName,deliveryPhone:boDelPh,
     status:status,delivery:"—",
-    stockAfter:items[0].stockAfter,notes:notes
-  };
+    stockAfter:items[0].stockAfter,notes:notes};
   S.ord.push(o);S.seq++;
-  logHistory("bulk_order",cust,"Order="+ordId+", "+items.length+" item(s), value=₹"+N(totalVal)+(boxTypeName?", box="+boxTypeName+"×"+bQty:""));
+  logHistory("bulk_order",cust,"Order="+ordId+", "+items.length+" row(s), value=₹"+N(totalVal)+(boxName?", box="+boxName+"×"+bQty:""));
   closeM();schedSave();render();
-  toast(ordId+" placed — "+items.length+" item(s)"+( boxTypeName?" + "+bQty+" "+boxTypeName:"")+" ✓","ok");
+  toast(ordId+" placed — "+items.length+" row(s)"+(boxName?" + "+bQty+" "+boxName:"")+" ✓","ok");
 }
+
+
 
 
 
