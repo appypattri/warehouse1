@@ -1614,22 +1614,72 @@ function openEditLotCode(li,ti){
   var l=S.lot[li];if(!l)return;
   var oldCode=l.lots[ti];
   var ld=(l.lotDates&&l.lotDates[oldCode])||{};
-  openM('<div class="modal wd"><div class="mhdr"><div class="mtitle">Edit Lot Code & Dates</div><button class="mclose" data-action="close-m">✕</button></div>'
+  // Auto-detect product unit from inventory
+  var invProd=S.inv.find(function(p){return p.name===l.name;});
+  var prodUnit=invProd?invProd.unit:"kg";
+  var curStock=invProd?(N(invProd.qty)+" "+prodUnit):"";
+  var rcvUnit=ld.receivedUnit||prodUnit;
+  function uLbl(u){return u==="pcs"?"pieces (pcs)":u==="kg"?"weight (kg)":u;}
+  function uOpt(v,label){return'<option value="'+v+'" '+(rcvUnit===v?"selected":"")+'>'+label+'</option>';}
+  var unitOpts=uOpt("kg","kg — weight")+uOpt("pcs","pcs — pieces")+uOpt("gm","gm — grams")+uOpt("litre","litre")+uOpt("box","box");
+
+  openM('<div class="modal wd">'
+    +'<div class="mhdr"><div class="mtitle">Edit Lot Code &amp; Dates</div>'
+    +'<button class="mclose" data-action="close-m">✕</button></div>'
     +'<div class="mbody">'
-    +'<div style="font-size:12.5px;color:var(--hx);margin-bottom:10px">Product: <strong style="color:var(--tx)">'+l.name+'</strong></div>'
-    +'<div class="f2"><div class="fg"><label class="fl">Current Lot Code</label><input class="fi" id="ec-old" value="'+oldCode+'" readonly style="color:var(--hx);font-family:monospace"></div>'
-    +'<div class="fg"><label class="fl">New Lot Code</label><input class="fi" id="ec-new" value="'+oldCode+'" style="font-family:monospace" placeholder="e.g. J260412"></div></div>'
-    +'<div class="f2"><div class="fg"><label class="fl">MFD Date (Manufacturing Date)</label><input class="fi" id="ec-mfd" type="date" value="'+(ld.mfd||"")+'"></div>'
-    +'<div class="fg"><label class="fl">Expiry Date</label><input class="fi" id="ec-exp" type="date" value="'+(ld.exp||"")+'"></div></div>'
-    +'<div class="fg"><label class="fl">Set as current active lot?</label>'
-    +'<select class="fi" id="ec-cur"><option value="1" '+(l.current===oldCode?"selected":"")+'>Yes — set as current</option><option value="0" '+(l.current!==oldCode?"selected":"")+'>No — keep current unchanged</option></select></div>'
+
+    // Product + current stock banner
+    +'<div style="background:var(--S2);border-radius:var(--R);padding:9px 13px;margin-bottom:12px;'
+    +'display:flex;justify-content:space-between;align-items:center">'
+    +'<div><span style="font-size:11px;color:var(--hx)">Product: </span>'
+    +'<strong style="color:var(--tx)">'+l.name+'</strong></div>'
+    +(curStock?'<span style="font-size:11.5px;color:var(--at);font-family:monospace">In stock: '+curStock+'</span>':"")
+    +'</div>'
+
+    // Lot code row
+    +'<div class="f2">'
+    +'<div class="fg"><label class="fl">Current Lot Code</label>'
+    +'<input class="fi" id="ec-old" value="'+oldCode+'" readonly style="color:var(--hx);font-family:monospace"></div>'
+    +'<div class="fg"><label class="fl">New Lot Code</label>'
+    +'<input class="fi" id="ec-new" value="'+oldCode+'" style="font-family:monospace" placeholder="e.g. J260412"></div></div>'
+
+    // MFD + Expiry row
+    +'<div class="f2">'
+    +'<div class="fg"><label class="fl">MFD Date (Manufacturing Date)</label>'
+    +'<input class="fi" id="ec-mfd" type="date" value="'+(ld.mfd||"")+'"></div>'
+    +'<div class="fg"><label class="fl">Expiry Date</label>'
+    +'<input class="fi" id="ec-exp" type="date" value="'+(ld.exp||"")+'"></div></div>'
+
+    // Quantity + Unit row
+    +'<div style="background:var(--S2);border:1px solid var(--bd);border-radius:var(--R);padding:12px;margin-bottom:2px">'
+    +'<div style="font-size:11px;font-weight:600;color:var(--at);text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px">'
+    +'⚖ Lot Quantity Received</div>'
+    +'<div class="f2">'
+    +'<div class="fg"><label class="fl">Quantity Received (<span id="ec-unit-lbl">'+uLbl(rcvUnit)+'</span>)</label>'
+    +'<input class="fi" id="ec-qty" type="number" min="0" step="0.001" value="'+(ld.receivedQty||"")+'" placeholder="0" style="font-size:15px;font-weight:600">'
+    +'<div style="font-size:10.5px;color:var(--hx);margin-top:3px">Stored per lot — shows in Shelf Life &amp; Lot Tracking</div></div>'
+    +'<div class="fg"><label class="fl">Unit</label>'
+    +'<select class="fi" id="ec-unit" onchange="(function(v){var l=document.getElementById(\'ec-unit-lbl\');if(l)l.textContent=v===\'pcs\'?\'pieces (pcs)\':v===\'kg\'?\'weight (kg)\':v;})(this.value)">'
+    +unitOpts
+    +'</select>'
+    +(curStock?'<div style="font-size:10.5px;color:var(--at);margin-top:3px">Current inventory: '+curStock+'</div>':"")
+    +'</div></div></div>'
+
+    // Set as current
+    +'<div class="fg" style="margin-top:4px"><label class="fl">Set as current active lot?</label>'
+    +'<select class="fi" id="ec-cur">'
+    +'<option value="1" '+(l.current===oldCode?"selected":"")+'>Yes — set as current</option>'
+    +'<option value="0" '+(l.current!==oldCode?"selected":"")+'>No — keep current unchanged</option>'
+    +'</select></div>'
     +'<div id="ec-slf-preview" style="margin-top:6px"></div>'
     +'</div>'
-    +'<div class="mfoot"><button class="btn" data-action="close-m">Cancel</button>'
+    +'<div class="mfoot">'
+    +'<button class="btn" data-action="close-m">Cancel</button>'
     +'<button class="btn dn" onclick="removeLotCode('+li+','+ti+');closeM()">🗑 Delete</button>'
     +'<button class="btn pr" onclick="saveEditLotCode('+li+','+ti+')">Save Changes</button>'
     +'</div></div>');
-  // Show shelf life preview
+
+  // Shelf life preview live update
   setTimeout(function(){
     var mEl=document.getElementById("ec-mfd"),xEl=document.getElementById("ec-exp"),pEl=document.getElementById("ec-slf-preview");
     function upd(){
@@ -1648,7 +1698,6 @@ function openEditLotCode(li,ti){
     upd();
   },50);
 }
-
 function saveEditLotCode(li,ti){
   var l=S.lot[li];if(!l)return;
   var oldCode=l.lots[ti];
@@ -1656,25 +1705,49 @@ function saveEditLotCode(li,ti){
   var setCur=(document.getElementById("ec-cur")||{value:"0"}).value==="1";
   var mfd=(document.getElementById("ec-mfd")||{value:""}).value;
   var exp=(document.getElementById("ec-exp")||{value:""}).value;
+  var rcvQty=parseFloat((document.getElementById("ec-qty")||{value:""}).value)||0;
+  var rcvUnit=(document.getElementById("ec-unit")||{value:""}).value||"kg";
   if(!newCode){toast("Enter a lot code","warn");return;}
   if(newCode!==oldCode&&l.lots.includes(newCode)){toast("Lot code already exists","warn");return;}
-  _pushUndo("Edit lot code "+oldCode,["lot","inv"]);
-  // Save lot dates
+  _pushUndo("Edit lot code "+oldCode,["lot","inv","pattri"]);
   if(!l.lotDates)l.lotDates={};
-  if(newCode!==oldCode){delete l.lotDates[oldCode];}
-  l.lotDates[newCode]={mfd:mfd||"",exp:exp||""};
+  // Preserve any existing receivedQty/Unit if not overridden
+  var existLd=l.lotDates[oldCode]||{};
+  if(newCode!==oldCode)delete l.lotDates[oldCode];
+  l.lotDates[newCode]={
+    mfd:mfd||"",
+    exp:exp||"",
+    receivedQty:rcvQty>0?rcvQty:(existLd.receivedQty||0),
+    receivedUnit:rcvQty>0?rcvUnit:(existLd.receivedUnit||rcvUnit),
+    lastReceivedDate:rcvQty>0?window.today():(existLd.lastReceivedDate||"")
+  };
   l.lots[ti]=newCode;
   if(l.current===oldCode||setCur)l.current=newCode;
-  // Interlink: if this is the current lot, sync MFD/Expiry + lot code to inventory
-  var invProdSync=S.inv.find(function(p){return p.name===l.name;});
-  if(invProdSync&&(l.current===newCode||setCur)){
-    if(mfd)invProdSync.mfd=mfd;
-    if(exp)invProdSync.exp=exp;
-    invProdSync.lot=newCode;
+
+  // ── Interlink: sync to inventory product if current lot
+  var invProd=S.inv.find(function(p){return p.name===l.name;});
+  if(invProd&&(l.current===newCode||setCur)){
+    if(mfd)invProd.mfd=mfd;
+    if(exp)invProd.exp=exp;
+    invProd.lot=newCode;
   }
-  logHistory("edit_lot",l.name,"lot "+oldCode+"→"+newCode+(mfd?", mfd="+mfd:"")+(exp?", exp="+exp:"")+(setCur?" (current)":""));
-  closeM();schedSave();render();toast("Lot updated ✓","ok");
+  // ── Interlink: if lot code changed, update lot references in orders
+  if(newCode!==oldCode){
+    S.ord.forEach(function(o){
+      if(o.lot===oldCode&&o.product===l.name)o.lot=newCode;
+      if(o.items)o.items.forEach(function(it){if(it.lot===oldCode&&it.product===l.name)it.lot=newCode;});
+    });
+  }
+
+  var detail="lot "+oldCode+(newCode!==oldCode?"→"+newCode:"")
+    +(mfd?", mfd="+mfd:"")+(exp?", exp="+exp:"")
+    +(rcvQty?", qty="+N(rcvQty)+" "+rcvUnit:"")
+    +(setCur?" (set as current)":"");
+  logHistory("edit_lot",l.name,detail);
+  closeM();schedSave();render();
+  toast("Lot updated"+(rcvQty?" · qty "+N(rcvQty)+" "+rcvUnit+" saved":"")+" ✓","ok");
 }
+
 
 function removeLotCode(li,ti){
   var l=S.lot[li];if(!l)return;
