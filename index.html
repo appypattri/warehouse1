@@ -372,7 +372,7 @@ input.fi[readonly]{color:var(--hx);cursor:default;}
         <button class="btn sm pu" data-tab="ai">🤖 <span class="hide-sm">AI Predict</span></button>
         <button class="btn sm te" data-tab="reports">📊 <span class="hide-sm">Reports</span></button>
         <button class="btn sm" data-action="open-pdf-import">📄 <span class="hide-sm">Import PDF</span></button>
-        <button class="btn sm" data-action="do-undo" id="undo-btn" title="Undo last change">↩ <span class="hide-sm">Undo</span></button>
+        <button class="btn sm" data-action="do-undo" id="undo-btn" title="Undo last change">↩ <span class="hide-sm">Undo</span></button><button class="btn sm" data-action="do-redo" id="redo-btn" title="Redo" style="opacity:0.45">↪ <span class="hide-sm">Redo</span></button>
         <button class="btn sm gr" data-action="full-backup">💾 <span class="hide-sm">Backup</span></button>
         <button class="btn sm" onclick="exportAll()">⬇ <span class="hide-sm">Export</span></button>
         <button class="btn sm" onclick="window.print()">🖨</button>
@@ -559,7 +559,7 @@ function _loadData(uid){
 
 function _saveNow(uid){
   _setSS("sv");
-  var targetId=window._workspaceId||uid;
+  var targetId=window._workspaceId||uid; // always write to the workspace the user is currently in
   if(!_db||!targetId)return;
   // Data size guard — Firestore doc limit ~1MB
   if(window.S){
@@ -611,6 +611,7 @@ const CFG={lowThresh:2000,pktLowThreshWt:200,pktLowThreshPcs:200,pktLowThresh:20
 // ── Global undo stack ──────────────────────────
 // ── UNDO SYSTEM ─────────────────────────────────────────────────
 var _undoStack=[];
+var _redoStack=[]; // redo stack
 
 function _pushUndo(label,snapshotKeys){
   if(!window.S)return;
@@ -627,40 +628,56 @@ function _pushUndo(label,snapshotKeys){
   _updateUndoBtn();
 }
 
+function _captureSnap(){
+  var keys=["inv","pkt","proc","ord","lot","vendors","customers","boxes","pattri","boxConfigs","movements","history","allowedUsers","backups"];
+  var snap={_seq:S.seq||1};
+  keys.forEach(function(k){try{snap[k]=JSON.parse(JSON.stringify(S[k]||[]));}catch(e){snap[k]=[];}});
+  return snap;
+}
+function _applySnap(snap){
+  Object.keys(snap).forEach(function(k){
+    if(k==="_seq"){S.seq=snap._seq;return;}
+    if(k==="_label"||k==="_ts")return;
+    try{var r=JSON.parse(JSON.stringify(snap[k]));S[k]=Array.isArray(r)?r:(r||[]);}catch(e){}
+  });
+}
 function _doUndo(){
   if(!_undoStack.length){toast("Nothing to undo","info");_updateUndoBtn();return;}
   var entry=_undoStack.pop();
-  var snap=entry.snap;
-  // Restore all snapshotted keys
-  Object.keys(snap).forEach(function(k){
-    if(k==="_seq"){S.seq=snap._seq;return;}
-    if(k==="_label"||k==="_ts")return; // metadata, skip
-    if(S.hasOwnProperty(k)||["inv","pkt","proc","ord","lot","vendors","customers","boxes","pattri","boxConfigs","movements","history","allowedUsers","backups"].indexOf(k)>=0){
-      try{
-        var restored=JSON.parse(JSON.stringify(snap[k]));
-        S[k]=Array.isArray(restored)?restored:(restored||[]);
-      }catch(e){}
-    }
-  });
-  _updateUndoBtn();
-  schedSave();
-  render();
+  var current=_captureSnap();
+  _redoStack.push({label:entry.label,snap:current});
+  if(_redoStack.length>30)_redoStack.shift();
+  _applySnap(entry.snap);
+  _updateUndoBtn();schedSave();render();
   toast("↩ Undone: "+entry.label+" ✓","info");
+}
+function _doRedo(){
+  if(!_redoStack.length){toast("Nothing to redo","info");_updateUndoBtn();return;}
+  var entry=_redoStack.pop();
+  var current=_captureSnap();
+  _undoStack.push({label:entry.label,snap:current});
+  if(_undoStack.length>30)_undoStack.shift();
+  _applySnap(entry.snap);
+  _updateUndoBtn();schedSave();render();
+  toast("↪ Redone: "+entry.label+" ✓","ok");
 }
 
 function _updateUndoBtn(){
   var btn=document.getElementById("undo-btn");
-  if(!btn)return;
-  var n=_undoStack.length;
-  btn.disabled=!n;
-  btn.style.opacity=n?"1":"0.45";
-  if(n){
-    var lbl=_undoStack[n-1].label||"";
-    btn.title="Undo: "+lbl+" ("+n+" step"+(n>1?"s":"")+" available)";
-    btn.innerHTML="↩ <span class=\"hide-sm\">Undo: "+lbl.slice(0,12)+"</span>";
-  } else {
-    btn.title="Nothing to undo";
-    btn.innerHTML="↩ <span class=\"hide-sm\">Undo</span>";
+  if(btn){
+    var n=_undoStack.length;
+    btn.disabled=!n;btn.style.opacity=n?"1":"0.45";
+    var lbl=n?(_undoStack[n-1].label||""):"";
+    btn.title=n?"Undo: "+lbl+" ("+n+" step"+(n>1?"s":"")+" available)":"Nothing to undo";
+    btn.innerHTML="↩ <span class=\"hide-sm\">"+(lbl?"Undo: "+lbl.slice(0,12):"Undo")+"</span>";
+  }
+  var rbtn=document.getElementById("redo-btn");
+  if(rbtn){
+    var nr=_redoStack.length;
+    rbtn.disabled=!nr;rbtn.style.opacity=nr?"1":"0.45";
+    var rlbl=nr?(_redoStack[nr-1].label||""):"";
+    rbtn.title=nr?"Redo: "+rlbl+" ("+nr+" step"+(nr>1?"s":"")+" available)":"Nothing to redo";
+    rbtn.innerHTML="↪ <span class=\"hide-sm\">"+(rlbl?"Redo: "+rlbl.slice(0,12):"Redo")+"</span>";
   }
 }
 let S={inv:[],pkt:[],proc:[],ord:[],lot:[],vendors:[],customers:[],movements:[],boxConfigs:[],boxes:[],pattri:[],history:[],allowedUsers:[],backups:[],seq:1};
@@ -1115,6 +1132,7 @@ function slfLotRow(lt, ld, ldl, lcol, lpct, li2, isRecent){
     +'<div style="font-size:11.5px;color:'+lcol+'">'+expVal+'</div></div>'
     +'</div>'
     +barHtml
+    +((ld&&ld.receivedQty)?('<div style="margin-top:5px;font-size:11px;color:var(--hx)">Lot qty: <strong style="color:var(--b2)">'+N(ld.receivedQty)+' '+(ld.receivedUnit||'')+'</strong></div>'):'')  
     +'</div>';
 }
 
@@ -1213,7 +1231,8 @@ function pShelfLife(){
     html +=     '<div style="font-size:11px;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">';
     html +=       '<span style="font-family:monospace;color:var(--at)">'+r.lot+'</span>';
     html +=       '<span style="color:var(--hx);font-size:10px">\u2713 Current</span>';
-    html +=       '<span style="color:var(--hx)">\xb7 '+N(r.qty)+' '+r.unit+'</span>';
+    html +=       '<span style="color:var(--hx)">\xb7 '+N(r.qty)+' '+r.unit+' in stock</span>';
+    var clqd=lotDates[r.lot]||{}; if(clqd.receivedQty) html += '<span style="color:var(--b2);font-size:10px">\xb7 '+N(clqd.receivedQty)+' '+(clqd.receivedUnit||r.unit)+' received</span>';
     if(allLots.length>1) html += '<span style="color:var(--hx);font-size:10px">\xb7 '+allLots.length+' lots</span>';
     html +=     '</div>';
     html +=   '</div>';
@@ -1794,7 +1813,11 @@ function openInvModal(idx){
   openM(`<div class="modal wd">
     <div class="mhdr"><div class="mtitle">${idx==null?"Add":"Edit"} Product Stock</div><button class="mclose" data-action="close-m">✕</button></div>
     <div class="mbody">
-      <div class="fg"><label class="fl">Product Name</label><input class="fi" id="m-name" value="${r.name||""}" placeholder="e.g. Ratlami Sev"></div>
+      <div class="fg"><label class="fl">Product Name</label>
+        <input class="fi" id="m-name" value="${r.name||""}" placeholder="e.g. Ratlami Sev" list="inv-name-list" autocomplete="off">
+        <datalist id="inv-name-list">${[...new Set(S.inv.map(p=>p.name))].sort().map(n=>`<option value="${n}">`).join("")}</datalist>
+        <div style="font-size:10.5px;color:var(--hx);margin-top:2px">Select existing or type new product name</div>
+      </div>
       <div class="f2"><div class="fg"><label class="fl">Lot Number</label><input class="fi" id="m-lot" value="${r.lot||""}" placeholder="e.g. J260311" style="font-family:'DM Mono',monospace"></div>
       <div class="fg"><label class="fl">Category</label><select class="fi" id="m-cat"><option ${r.cat==="Product"?"selected":""}>Product</option><option ${r.cat==="Raw Material"?"selected":""}>Raw Material</option><option ${r.cat==="Packaging"?"selected":""}>Packaging</option></select></div></div>
       <div class="f3"><div class="fg"><label class="fl">Quantity</label><input class="fi" id="m-qty" type="number" min="0" value="${r.qty||""}" placeholder="0"></div>
@@ -1874,9 +1897,13 @@ function openProcModal(idx,prefVendor="",prefQty="",prefUnit="kg"){
     <div class="mhdr"><div class="mtitle">${idx==null?"Add":"Edit"} Purchase Order</div><button class="mclose" data-action="close-m">✕</button></div>
     <div class="mbody">
       <div class="f2"><div class="fg"><label class="fl">PO Number</label><input class="fi" id="m-po" value="${r.po==="—"?"":r.po||""}" placeholder="FINEST/2026/Apr/046"></div>
-      <div class="fg"><label class="fl">Vendor / Product</label>
-        <input class="fi" id="m-vendor" value="${r.vendor||prefVendor}" placeholder="e.g. Ratlami Sev" list="vendor-list">
-        <datalist id="vendor-list">${S.vendors.map(v=>`<option value="${v.name}">`).join("")}</datalist>
+      <div class="fg"><label class="fl">Vendor / Product Name</label>
+        <input class="fi" id="m-vendor" value="${r.vendor||prefVendor}" placeholder="e.g. Ratlami Sev" list="vendor-list" autocomplete="off">
+        <datalist id="vendor-list">
+          ${S.vendors.map(v=>`<option value="${v.name}">`).join("")}
+          ${S.inv.map(p=>`<option value="${p.name}">`).join("")}
+        </datalist>
+        <div style="font-size:10.5px;color:var(--hx);margin-top:2px">Select from vendors/products or type new</div>
       </div></div>
       <div class="f3"><div class="fg"><label class="fl">Quantity</label><input class="fi" id="m-qty" type="number" value="${(r.qty||prefQty).toString().replace?((r.qty||prefQty).toString().replace(/[^\d.]/g,"")):prefQty}" placeholder="0"></div>
       <div class="fg"><label class="fl">Unit</label><select class="fi" id="m-unit"><option value="kg" ${!(r.qty||"").includes("pcs")&&prefUnit!=="pcs"?"selected":""}>kg</option><option value="pcs" ${(r.qty||"").includes("pcs")||prefUnit==="pcs"?"selected":""}>pcs</option></select></div>
@@ -1986,29 +2013,133 @@ function openOrderModal(idx){
   setTimeout(function(){updateOrderTotal();},50);
 }
 
-function buildOrderItemRow(i,item){
-  var invOpts='<option value="">— Select Product —</option>'+S.inv.map(function(r,j){return '<option value="inv:'+j+'" '+(item&&item.srcKey==="inv:"+j?"selected":"")+'>'+r.name+' — '+r.lot+' ('+N(r.qty)+' '+r.unit+')</option>';}).join("");
-  var pktOpts=S.pkt.map(function(r,j){return '<option value="pkt:'+j+'" '+(item&&item.srcKey==="pkt:"+j?"selected":"")+'>'+r.name+' ('+r.type+') — '+N(r.qty)+' '+r.unit+'</option>';}).join("");
-  var src=item?item.srcKey:"";
-  var srcUnit=item?item.unit:"";
-  var qty=item?item.qty:"";
-  var price=item?item.price:"";
+// ── NEW buildOrderItemRow: Products and Packets in separate columns with lot select
+function buildOrderItemRow(i, item) {
+  var invOpts = '<option value="">— Select Product —</option>'
+    + S.inv.map(function(r,j){
+        var sel = item && item.srcKey === 'inv:'+j ? 'selected' : '';
+        return '<option value="inv:'+j+'" '+sel+'>'+r.name+' · '+r.lot+' ('+N(r.qty)+' '+r.unit+')</option>';
+      }).join('');
+
+  var pktOpts = '<option value="">— Select Packet —</option>'
+    + S.pkt.map(function(r,j){
+        var sel = item && item.srcKey === 'pkt:'+j ? 'selected' : '';
+        return '<option value="pkt:'+j+'" '+sel+'>'+r.name+' ('+r.type+') — '+N(r.qty)+' '+r.unit+'</option>';
+      }).join('');
+
+  var qty   = item ? item.qty   : '';
+  var price = item ? item.price : '';
+  var lotSel = item ? (item.lot||'') : '';
+
+  // Build lot options for the currently selected product
+  var lotOpts = '<option value="">— Lot —</option>';
+  if (item && item.srcKey && item.srcKey.indexOf('inv:') === 0) {
+    var pidx = +item.srcKey.split(':')[1];
+    var prod = S.inv[pidx];
+    if (prod) {
+      var lg = S.lot.find(function(l){ return l.name === prod.name; });
+      if (lg) {
+        lotOpts = lg.lots.slice().reverse().map(function(lt){
+          var sel = lt === lotSel ? 'selected' : '';
+          var ld  = (lg.lotDates||{})[lt]||{};
+          var tag = lt === lg.current ? ' ✓' : '';
+          var qty_tag = ld.receivedQty ? ' ('+N(ld.receivedQty)+' '+ld.receivedUnit+')' : '';
+          return '<option value="'+lt+'" '+sel+'>'+lt+tag+qty_tag+'</option>';
+        }).join('');
+      } else {
+        lotOpts = '<option value="'+prod.lot+'" selected>'+prod.lot+' ✓</option>';
+      }
+    }
+  }
+
   return '<div id="ord-row-'+i+'" style="background:var(--S2);border:1px solid var(--bd);border-radius:var(--R);padding:12px;margin-bottom:8px">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
     +'<div style="font-size:11px;font-weight:600;color:var(--hx)">ITEM '+(i+1)+'</div>'
     +(i>0?'<button class="btn xs dn" onclick="removeOrderItemRow('+i+')">✕ Remove</button>':'')
     +'</div>'
-    +'<div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px">'
-    +'<div class="fg"><label class="fl">Product / Packet</label>'
-    +'<select class="fi" id="oi-src-'+i+'" onchange="updateOrderItemUnit('+i+');updateOrderTotal()">'
-    +'<optgroup label="Product Inventory">'+invOpts+'</optgroup>'
-    +'<optgroup label="Packet Inventory">'+pktOpts+'</optgroup>'
+    // Row 1: Product column + Packet column
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'
+    +'<div class="fg"><label class="fl" style="color:var(--g2)">📦 Product (from Inventory)</label>'
+    +'<select class="fi" id="oi-inv-'+i+'" onchange="onOrdInvChange('+i+');updateOrderTotal()">'
+    +invOpts
     +'</select></div>'
-    +'<div class="fg"><label class="fl">Qty</label><input class="fi" id="oi-qty-'+i+'" type="number" min="1" value="'+qty+'" placeholder="0" oninput="updateOrderTotal()"></div>'
-    +'<div class="fg"><label class="fl">Unit</label><input class="fi" id="oi-unit-'+i+'" value="'+srcUnit+'" readonly placeholder="—"></div>'
-    +'<div class="fg"><label class="fl">Unit Price (₹)</label><input class="fi" id="oi-price-'+i+'" type="number" min="0" value="'+price+'" placeholder="0" oninput="updateOrderTotal()"></div>'
-    +'</div></div>';
+    +'<div class="fg"><label class="fl" style="color:var(--b2)">🗂 Packet (from Packets)</label>'
+    +'<select class="fi" id="oi-pkt-'+i+'" onchange="onOrdPktChange('+i+');updateOrderTotal()">'
+    +pktOpts
+    +'</select></div>'
+    +'</div>'
+    // Row 2: Lot (for product) | Qty | Unit | Price
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">'
+    +'<div class="fg" id="oi-lot-wrap-'+i+'"><label class="fl">Lot Number</label>'
+    +'<select class="fi" id="oi-lot-'+i+'">'
+    +lotOpts
+    +'</select></div>'
+    +'<div class="fg"><label class="fl">Qty</label>'
+    +'<input class="fi" id="oi-qty-'+i+'" type="number" min="1" value="'+qty+'" placeholder="0" oninput="updateOrderTotal()"></div>'
+    +'<div class="fg"><label class="fl">Unit</label>'
+    +'<input class="fi" id="oi-unit-'+i+'" readonly placeholder="—" value="'+(item?item.unit||'':'')+'"></div>'
+    +'<div class="fg"><label class="fl">Unit Price (₹)</label>'
+    +'<input class="fi" id="oi-price-'+i+'" type="number" min="0" value="'+price+'" placeholder="0" oninput="updateOrderTotal()"></div>'
+    +'</div>'
+    // Stock preview
+    +'<div id="oi-prev-'+i+'" style="margin-top:6px"></div>'
+    +'</div>';
 }
+
+function onOrdInvChange(i){
+  var invSel = document.getElementById('oi-inv-'+i);
+  if(!invSel) return;
+  // Clear packet selection
+  var pktSel = document.getElementById('oi-pkt-'+i);
+  if(pktSel) pktSel.value = '';
+  var src = invSel.value;
+  var unitEl = document.getElementById('oi-unit-'+i);
+  var lotWrap = document.getElementById('oi-lot-wrap-'+i);
+  var lotSel = document.getElementById('oi-lot-'+i);
+  var prevEl = document.getElementById('oi-prev-'+i);
+  if(!src){ if(unitEl)unitEl.value=''; if(lotSel)lotSel.innerHTML='<option value="">— Lot —</option>'; return; }
+  var parts = src.split(':');
+  var prod = S.inv[+parts[1]];
+  if(!prod){ if(unitEl)unitEl.value=''; return; }
+  if(unitEl) unitEl.value = prod.unit;
+  // Build lot options
+  var lg = S.lot.find(function(l){ return l.name===prod.name; });
+  var lopts = '';
+  if(lg){
+    lopts = lg.lots.slice().reverse().map(function(lt){
+      var ld=(lg.lotDates||{})[lt]||{};
+      var tag=lt===lg.current?' ✓ Current':'';
+      var qtag=ld.receivedQty?' ('+N(ld.receivedQty)+' '+(ld.receivedUnit||prod.unit)+')':'';
+      return '<option value="'+lt+'" '+(lt===lg.current?'selected':'')+'>'+lt+tag+qtag+'</option>';
+    }).join('');
+  } else {
+    lopts = '<option value="'+prod.lot+'" selected>'+prod.lot+' ✓</option>';
+  }
+  if(lotSel) lotSel.innerHTML = lopts;
+  // Stock preview
+  if(prevEl) prevEl.innerHTML='<div style="font-size:11.5px;color:var(--hx)">Available: <strong style="color:var(--at)">'+N(prod.qty)+' '+prod.unit+'</strong></div>';
+}
+
+function onOrdPktChange(i){
+  var pktSel = document.getElementById('oi-pkt-'+i);
+  if(!pktSel) return;
+  // Clear product selection
+  var invSel = document.getElementById('oi-inv-'+i);
+  if(invSel) invSel.value = '';
+  // Clear lot dropdown
+  var lotSel = document.getElementById('oi-lot-'+i);
+  if(lotSel) lotSel.innerHTML='<option value="">N/A</option>';
+  var src = pktSel.value;
+  var unitEl = document.getElementById('oi-unit-'+i);
+  var prevEl = document.getElementById('oi-prev-'+i);
+  if(!src){ if(unitEl)unitEl.value=''; return; }
+  var parts = src.split(':');
+  var pkt = S.pkt[+parts[1]];
+  if(!pkt){ if(unitEl)unitEl.value=''; return; }
+  if(unitEl) unitEl.value = pkt.unit;
+  if(prevEl) prevEl.innerHTML='<div style="font-size:11.5px;color:var(--hx)">Available: <strong style="color:var(--at)">'+N(pkt.qty)+' '+pkt.unit+'</strong></div>';
+}
+
 
 function addOrderItemRow(){
   var i=window._ordRowCount++;
@@ -2216,6 +2347,7 @@ function handleClick(e){
   if(t){TAB=t;closeM();closeSidebar();render();return;}
   switch(a){
     case"do-undo":_doUndo();break;
+    case"do-redo":_doRedo();break;
     case"ord-page-prev":{FV["ord_page"]=Math.max(0,(parseInt(FV["ord_page"]||0)-1));try{document.getElementById("content").innerHTML=buildPane();}catch(ex){}}break;
     case"ord-page-next":{FV["ord_page"]=(parseInt(FV["ord_page"]||0)+1);try{document.getElementById("content").innerHTML=buildPane();}catch(ex){}}break;
     case"inv-page-prev":{FV["inv_page"]=Math.max(0,(parseInt(FV["inv_page"]||0)-1));try{document.getElementById("content").innerHTML=buildPane();}catch(ex){}}break;
@@ -2555,13 +2687,17 @@ function saveOrder(idx){
   for(var i=0;i<(window._ordRowCount||1);i++){
     var rowEl=document.getElementById("ord-row-"+i);
     if(!rowEl)continue;
-    var srcKey=(document.getElementById("oi-src-"+i)||{value:""}).value;
+    // Determine if product or packet was selected
+    var invVal=(document.getElementById("oi-inv-"+i)||{value:""}).value;
+    var pktVal=(document.getElementById("oi-pkt-"+i)||{value:""}).value;
+    var srcKey=invVal||pktVal;
+    var selLot=(document.getElementById("oi-lot-"+i)||{value:""}).value;
     var qty=parseFloat((document.getElementById("oi-qty-"+i)||{value:0}).value)||0;
     var price=parseFloat((document.getElementById("oi-price-"+i)||{value:0}).value)||0;
     if(!srcKey||!qty)continue;
     var parts=srcKey.split(":");
     var ref=null,pName="",pLot="",pType="",unit="",orderType="";
-    if(parts[0]==="inv"&&S.inv[+parts[1]]){ref=S.inv[+parts[1]];pName=ref.name;pLot=ref.lot;unit=ref.unit;orderType="product";}
+    if(parts[0]==="inv"&&S.inv[+parts[1]]){ref=S.inv[+parts[1]];pName=ref.name;pLot=selLot||ref.lot;unit=ref.unit;orderType="product";}
     else if(parts[0]==="pkt"&&S.pkt[+parts[1]]){ref=S.pkt[+parts[1]];pName=ref.name;pType=ref.type;unit=ref.unit;orderType="packet";}
     if(!ref){toast("Invalid selection in item "+(i+1),"warn");return;}
     // If editing, restore original qty for this item first
@@ -2857,7 +2993,8 @@ function pPkt(){
 // ─── PROCUREMENT ───────────────────────────────────────────────
 function pProc(){
   const q=(FV.proc||"").toLowerCase(),st=FV["proc-st"]||"";
-  const rows=S.proc.filter(r=>(!q||[r.po,r.vendor,r.status,r.flag].join(" ").toLowerCase().includes(q))&&(!st||r.status.toLowerCase().includes(st)||r.flag.toLowerCase().includes(st)));
+  // Show newest POs first (reverse insertion order)
+  const rows=S.proc.slice().reverse().filter(r=>(!q||[r.po,r.vendor,r.status,r.flag].join(" ").toLowerCase().includes(q))&&(!st||r.status.toLowerCase().includes(st)||r.flag.toLowerCase().includes(st)));
   const unpaid=S.proc.filter(p=>p.status==="RECEIVED"&&!p.paid).length;
   return`
   ${unpaid?`<div class="abar amber">💰 ${unpaid} received PO(s) are unpaid — review payment status.</div>`:""}
@@ -3875,7 +4012,7 @@ function saveBulkOrder(){
     if(!src||!qty)continue;
     var parts=src.split(":");
     var ref=null,pName="",pLot="",pType="",unit="",orderType="";
-    if(parts[0]==="inv"&&S.inv[+parts[1]]){ref=S.inv[+parts[1]];pName=ref.name;pLot=ref.lot;unit=ref.unit;orderType="product";}
+    if(parts[0]==="inv"&&S.inv[+parts[1]]){ref=S.inv[+parts[1]];pName=ref.name;pLot=selLot||ref.lot;unit=ref.unit;orderType="product";}
     else if(parts[0]==="pkt"&&S.pkt[+parts[1]]){ref=S.pkt[+parts[1]];pName=ref.name;pType=ref.type;unit=ref.unit;orderType="packet";}
     if(!ref){errors.push("Row "+(i+1)+": invalid selection");continue;}
     if(qty>ref.qty){errors.push("Row "+(i+1)+": "+pName+" — only "+N(ref.qty)+" "+unit+" available, requested "+N(qty));continue;}
@@ -3950,6 +4087,17 @@ function pTeam(){
   html+='<div style="font-size:11.5px;color:var(--hx);margin-top:2px">Workspace ID: <span style="font-family:DM Mono,monospace;color:var(--at)">'+wsId+'</span></div></div></div>';
   if(isOwner){
     html+='<div style="font-size:12.5px;color:var(--mx);margin-bottom:10px">Share your <strong>Workspace ID</strong> with teammates. They enter it in their app to access the same data.</div>';
+    // Transfer ownership option
+    html+='<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--bd)">';
+    html+='<div style="font-size:12px;font-weight:600;color:var(--y2);margin-bottom:6px">🔑 Transfer Admin / Ownership</div>';
+    html+='<div style="font-size:11.5px;color:var(--hx);margin-bottom:8px">Transfer full ownership to a team member. They become the new admin. You retain access as a member.</div>';
+    html+='<div style="display:flex;gap:8px;align-items:flex-end">';
+    html+='<div class="fg" style="flex:1"><label class="fl">Member email to promote</label>';
+    html+='<select class="fi" id="ws-transfer-email"><option value="">— Select member —</option>';
+    (S.allowedUsers||[]).forEach(function(m){ html+='<option value="'+m+'">'+m+'</option>'; });
+    html+='</select></div>';
+    html+='<button class="btn" style="background:var(--y1);color:var(--y2);border-color:var(--y2)" onclick="transferAdmin()">🔑 Transfer</button>';
+    html+='</div></div>';
     html+='<div style="display:flex;align-items:center;gap:8px;background:var(--S2);border-radius:var(--R);padding:10px 13px">';
     html+='<span style="font-family:DM Mono,monospace;font-size:13px;color:var(--at);flex:1;word-break:break-all">'+wsId+'</span>';
     html+='<button class="btn xs pr" onclick="copyWsId()">📋 Copy</button></div>';
@@ -4022,16 +4170,52 @@ function joinWorkspace(){
     if(!allowed.includes(window._uid)&&!allowed.includes(window._userEmail)){
       showApp();toast("Access denied — ask the owner to add your email ("+window._userEmail+")","warn");return;
     }
-    // Save preference
+    // Save preference firmly
     try{localStorage.setItem("finest_ws_"+window._uid,wsId);}catch(e){}
-    window._workspaceId=wsId;window._isOwner=false;
-    // Reset and load new workspace data
+    window._workspaceId=wsId;
+    window._isOwner=false;
+    window._wsOwnerUid=wsId; // owner uid = their workspace doc id
+    // Clear local state and reload from the shared workspace
     if(window.resetToDefaults)resetToDefaults();
-    _loadData(window._uid);
-    toast("Joined workspace! Loading shared data…","ok");
+    showLoad("Loading shared workspace data…");
+    // Load directly from the target workspace doc
+    _db.collection("warehouses").doc(wsId).get().then(function(wsnap){
+      if(wsnap.exists()){
+        var wd=wsnap.data();
+        var ks=["inv","pkt","proc","ord","lot","vendors","customers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"];
+        ks.forEach(function(k){if(wd[k])try{S[k]=JSON.parse(wd[k]);}catch(e){}});
+        if(wd.seq)S.seq=wd.seq;
+        if(wd.settings)try{Object.assign(CFG,JSON.parse(wd.settings));}catch(e){}
+        // Sanitise
+        ["inv","pkt","proc","ord","lot","vendors","customers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"].forEach(function(k){if(!Array.isArray(S[k]))S[k]=[];});
+      }
+      showApp();render();
+      toast("✓ Joined workspace! Shared data loaded.","ok");
+    }).catch(function(e){showApp();render();toast("Load error: "+e.message,"warn");});
   }).catch(function(e){
     showApp();toast("Error: "+e.message,"warn");
   });
+}
+
+function transferAdmin(){
+  var email=(document.getElementById("ws-transfer-email")||{value:""}).value.trim();
+  if(!email){toast("Select a member to transfer to","warn");return;}
+  if(!confirm("Transfer full admin ownership to "+email+"? They become the new workspace owner. You will become a regular member."))return;
+  // The new admin's UID must be known — store their email as newOwner flag
+  // Approach: store a "pendingTransfer" field; new admin claims it on next load
+  if(!_db){toast("Not connected","warn");return;}
+  var payload={pendingTransfer:email,pendingTransferFrom:window._userEmail||window._uid};
+  _db.collection("warehouses").doc(window._workspaceId).set(payload,{merge:true})
+    .then(function(){
+      // Add current owner to allowedUsers so they keep access
+      if(!S.allowedUsers)S.allowedUsers=[];
+      var myEmail=window._userEmail||"";
+      if(myEmail&&!S.allowedUsers.includes(myEmail))S.allowedUsers.push(myEmail);
+      schedSave();
+      toast("Transfer request sent to "+email+". They must open the app to accept.","ok");
+      logHistory("transfer_admin",email,"admin transfer initiated");
+      render();
+    }).catch(function(e){toast("Error: "+e.message,"warn");});
 }
 
 function leaveWorkspace(){
