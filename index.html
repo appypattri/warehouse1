@@ -517,7 +517,7 @@ function _loadData(uid){
         if(window.toast)toast("Workspace access denied — switched to your own data","warn");
         _loadData(uid);return;
       }
-      ["inv","pkt","proc","ord","lot","vendors","customers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"].forEach(function(k){
+      ["inv","pkt","proc","ord","lot","vendors","customers","dispatchers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"].forEach(function(k){
         if(d[k])try{if(window.S)S[k]=JSON.parse(d[k]);}catch(e){}
       });
       if(d.seq&&window.S)S.seq=d.seq;
@@ -535,7 +535,7 @@ function _loadData(uid){
     }
     // Ensure all arrays are valid after load + sanitise types
     if(window.S){
-      var arrKeys=["inv","pkt","proc","ord","lot","vendors","customers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"];
+      var arrKeys=["inv","pkt","proc","ord","lot","vendors","customers","dispatchers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"];
       arrKeys.forEach(function(k){if(!Array.isArray(S[k]))S[k]=[];});
       if(!S.seq||isNaN(S.seq))S.seq=1;
       // Sanitise inventory: ensure qty is always a number
@@ -551,7 +551,7 @@ function _loadData(uid){
   }).catch(function(e){
     if(window.toast)toast("Load error: "+e.message,"warn");
     // Still show app with whatever state we have
-    if(window.S){["inv","pkt","proc","ord","lot","vendors","customers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"].forEach(function(k){if(!Array.isArray(S[k]))S[k]=[];});}
+    if(window.S){["inv","pkt","proc","ord","lot","vendors","customers","dispatchers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"].forEach(function(k){if(!Array.isArray(S[k]))S[k]=[];});}
     showApp();
     if(window.render)render();
   });
@@ -576,7 +576,7 @@ function _saveNow(uid){
   }
   var payload={seq:window.S?S.seq:1,updatedAt:new Date().toISOString(),settings:window.CFG?JSON.stringify(CFG):"{}",lastEditBy:window._userEmail||uid,lastEditName:window._userName||""};
   if(window.S){
-    ["inv","pkt","proc","ord","lot","vendors","customers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"].forEach(function(k){
+    ["inv","pkt","proc","ord","lot","vendors","customers","dispatchers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"].forEach(function(k){
       payload[k]=JSON.stringify(S[k]||[]);
     });
     // If owner, also save allowed users list
@@ -680,7 +680,7 @@ function _updateUndoBtn(){
     rbtn.innerHTML="↪ <span class=\"hide-sm\">"+(rlbl?"Redo: "+rlbl.slice(0,12):"Redo")+"</span>";
   }
 }
-let S={inv:[],pkt:[],proc:[],ord:[],lot:[],vendors:[],customers:[],movements:[],boxConfigs:[],boxes:[],pattri:[],history:[],allowedUsers:[],backups:[],seq:1};
+let S={inv:[],pkt:[],proc:[],ord:[],lot:[],vendors:[],customers:[],dispatchers:[],movements:[],boxConfigs:[],boxes:[],pattri:[],history:[],allowedUsers:[],backups:[],seq:1};
 let TAB="dashboard",FV={},OT="product";
 
 const TABS={
@@ -702,6 +702,7 @@ const TABS={
   alerts:{title:"Alerts & Notifications",sub:"Low stock, expiry & operational warnings"},
   history:{title:"Activity History",sub:"Complete log of all changes — who did what and when"},
   team:{title:"Team & Access",sub:"Manage who can access this workspace"},
+  dispatchers:{title:"Dispatchers & Agents",sub:"Manage dispatch agents, transporters and delivery contacts"},
   backup:{title:"Backup & Restore",sub:"Save, restore and manage all your warehouse data"},
 };
 
@@ -925,6 +926,7 @@ function buildNav(){
     {sec:"Masters",id:"grp-masters",items:[
       {id:"vendors",icon:"🏭",label:"Vendors"},
       {id:"customers",icon:"👥",label:"Customers"},
+      {id:"dispatchers",icon:"🚛",label:"Dispatchers"},
     ]},
     {sec:"Intelligence",id:"grp-intel",items:[
       {id:"ai",icon:"🤖",label:"AI Predict"},
@@ -1007,7 +1009,7 @@ function toggleNavGroup(grpId){
 //  PANES
 // ══════════════════════════════════════════════
 function buildPane(){
-  const map={dashboard:pDash,inventory:pInv,shelflife:pShelfLife,pattri:pPattri,packets:pPkt,procurement:pProc,orders:pOrders,movements:pMovements,vendors:pVendors,customers:pCustomers,ai:pAI,reports:pReports,lots:pLots,alerts:pAlerts,boxcalc:pBoxCalc,boxinv:pBoxInv,history:pHistory,team:pTeam,backup:pBackup};
+  const map={dashboard:pDash,inventory:pInv,shelflife:pShelfLife,pattri:pPattri,packets:pPkt,procurement:pProc,orders:pOrders,movements:pMovements,vendors:pVendors,customers:pCustomers,dispatchers:pDispatchers,ai:pAI,reports:pReports,lots:pLots,alerts:pAlerts,boxcalc:pBoxCalc,boxinv:pBoxInv,history:pHistory,team:pTeam,backup:pBackup};
   return(map[TAB]||pDash)();
 }
 
@@ -1363,6 +1365,84 @@ function pShelfLife(){
     +withoutHtml;
 }
 
+// ─── DISPATCHERS & AGENTS ─────────────────────
+function pDispatchers(){
+  var q=(FV.disp||"").toLowerCase();
+  var rows=(S.dispatchers||[]).filter(function(d){return !q||[d.name,d.phone,d.city,d.type].join(" ").toLowerCase().includes(q);});
+  var html="";
+  html+='<div class="frow">';
+  html+='<input class="si" placeholder="🔍 Search dispatcher or agent…" value="'+(FV.disp||"")+'" data-filter="disp">';
+  html+='<div class="ml btn-group">';
+  html+='<button class="btn sm" data-action="export-disp">⬇ Export</button>';
+  html+='<button class="btn sm pr" data-action="open-disp">+ Add Dispatcher</button>';
+  html+='</div></div>';
+  html+='<div class="tw"><table><thead><tr><th>#</th><th>Name / Company</th><th>Type</th><th>Contact Person</th><th>Phone</th><th>Alt Phone</th><th>Dispatch From</th><th>Delivers To</th><th>Notes</th><th>Actions</th></tr></thead><tbody>';
+  if(rows.length){
+    rows.forEach(function(d,i){
+      html+='<tr class="dr">';
+      html+='<td class="d">'+(i+1)+'</td>';
+      html+='<td><strong>'+d.name+'</strong></td>';
+      html+='<td>'+bx("b",d.type||"Agent")+'</td>';
+      html+='<td>'+(d.contact||"—")+'</td>';
+      html+='<td><a href="tel:'+d.phone+'" style="color:var(--b2);text-decoration:none">'+(d.phone||"—")+'</a></td>';
+      html+='<td class="d">'+(d.altPhone||"—")+'</td>';
+      html+='<td class="d">'+(d.fromPlace||"—")+'</td>';
+      html+='<td class="d">'+(d.toPlace||"—")+'</td>';
+      html+='<td class="d" style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(d.notes||"—")+'</td>';
+      html+='<td><div class="act">';
+      html+='<button class="btn xs" data-action="edit-disp" data-i="'+(S.dispatchers||[]).indexOf(d)+'">✏</button>';
+      html+='<button class="btn xs dn" data-action="del-disp" data-i="'+(S.dispatchers||[]).indexOf(d)+'">🗑</button>';
+      html+='</div></td></tr>';
+    });
+  } else {
+    html+='<tr class="empty"><td colspan="10">No dispatchers yet — click "+ Add Dispatcher" to add one.</td></tr>';
+  }
+  html+='</tbody></table></div>';
+  return html;
+}
+
+function openDispatcherModal(idx){
+  var d=idx!=null?(S.dispatchers||[])[idx]:{};
+  var types=["Transport Agent","Courier","Own Vehicle","Third-Party Logistics","Direct Delivery"];
+  var typeOpts=types.map(function(t){return'<option value="'+t+'" '+(d.type===t?"selected":"")+'>'+t+'</option>';}).join("");
+  openM('<div class="modal wd">'
+    +'<div class="mhdr"><div class="mtitle">'+(idx==null?"Add":"Edit")+' Dispatcher / Agent</div><button class="mclose" data-action="close-m">✕</button></div>'
+    +'<div class="mbody">'
+    +'<div class="fg"><label class="fl">Agent / Company Name</label><input class="fi" id="m-dname" value="'+(d.name||"")+'" placeholder="e.g. Rajesh Transport Co."></div>'
+    +'<div class="f2"><div class="fg"><label class="fl">Type</label>'
+    +'<select class="fi" id="m-dtype"><option value="">— Select —</option>'+typeOpts+'</select></div>'
+    +'<div class="fg"><label class="fl">Contact Person</label><input class="fi" id="m-dcontact" value="'+(d.contact||"")+'" placeholder="e.g. Rajesh Kumar"></div></div>'
+    +'<div class="f2"><div class="fg"><label class="fl">Primary Phone</label><input class="fi" id="m-dphone" type="tel" value="'+(d.phone||"")+'" placeholder="9876543210"></div>'
+    +'<div class="fg"><label class="fl">Alternate Phone</label><input class="fi" id="m-daltph" type="tel" value="'+(d.altPhone||"")+'" placeholder="9876543211"></div></div>'
+    +'<div class="f2"><div class="fg"><label class="fl">Dispatch From (City/Place)</label><input class="fi" id="m-dfrom" value="'+(d.fromPlace||"")+'" placeholder="e.g. Mumbai, Maharashtra"></div>'
+    +'<div class="fg"><label class="fl">Delivers To (City/Areas)</label><input class="fi" id="m-dto" value="'+(d.toPlace||"")+'" placeholder="e.g. Delhi, Jaipur, Gujarat"></div></div>'
+    +'<div class="fg"><label class="fl">Notes / Vehicle Details</label><input class="fi" id="m-dnotes" value="'+(d.notes||"")+'" placeholder="e.g. MH-12-AB-1234, 1-ton LCV, specialises in food grade…"></div>'
+    +'</div>'
+    +'<div class="mfoot"><button class="btn" data-action="close-m">Cancel</button>'
+    +'<button class="btn pr" data-action="save-disp" data-i="'+(idx!=null?idx:"")+'">Save</button>'
+    +'</div></div>');
+}
+
+function saveDispatcher(idx){
+  if(!S.dispatchers)S.dispatchers=[];
+  if(idx!=null)_pushUndo("Edit dispatcher",["dispatchers"]);
+  var d={
+    id:idx!=null?S.dispatchers[idx].id:"D"+uid(),
+    name:gv("m-dname").trim(),
+    type:gv("m-dtype"),
+    contact:gv("m-dcontact").trim(),
+    phone:gv("m-dphone").trim(),
+    altPhone:gv("m-daltph").trim(),
+    fromPlace:gv("m-dfrom").trim(),
+    toPlace:gv("m-dto").trim(),
+    notes:gv("m-dnotes").trim()
+  };
+  if(!d.name){toast("Dispatcher name required","warn");return;}
+  if(idx==null)S.dispatchers.push(d);else S.dispatchers[idx]=d;
+  logHistory(idx==null?"add_dispatcher":"edit_dispatcher",d.name,"phone="+d.phone+", from="+d.fromPlace);
+  closeM();schedSave();render();toast(idx==null?"Dispatcher added ✓":"Dispatcher updated ✓","ok");
+}
+
 // ─── VENDORS ──────────────────────────────────
 function pVendors(){
   const q=(FV.ven||"").toLowerCase();
@@ -1399,7 +1479,7 @@ function pCustomers(){
     <input class="si" placeholder="🔍 Search customer…" value="${FV.cust||""}" data-filter="cust">
     <div class="ml btn-group"><button class="btn sm" data-action="export-cust">⬇ Export</button><button class="btn sm te" data-action="import-cust">⬆ Import</button><button class="btn sm pr" data-action="open-customer">+ Add Customer</button></div>
   </div>
-  <div class="tw"><table><thead><tr><th>#</th><th>Customer Name</th><th>Contact</th><th>Phone</th><th>Email</th><th>City</th><th>Credit Days</th><th>Orders</th><th>Actions</th></tr></thead><tbody>
+  <div class="tw"><table><thead><tr><th>#</th><th>Customer Name</th><th>Contact</th><th>Phone</th><th>Email</th><th>City</th><th>GSTIN</th><th>Credit Days</th><th>Orders</th><th>Actions</th></tr></thead><tbody>
   ${rows.length?rows.map((c,i)=>{const cOrds=S.ord.filter(o=>o.customer===c.name).length;return`<tr class="dr">
     <td class="d">${i+1}</td>
     <td><strong>${c.name}</strong></td>
@@ -1407,6 +1487,7 @@ function pCustomers(){
     <td><a href="tel:${c.phone}" style="color:var(--b2);text-decoration:none">${c.phone||"—"}</a></td>
     <td class="d">${c.email||"—"}</td>
     <td class="d">${c.city||"—"}</td>
+    <td class="d" style="font-family:monospace;font-size:11px">${c.gstin||"—"}</td>
     <td>${bx(c.creditDays>0?"a":"g",c.creditDays>0?c.creditDays+"d":"Cash")}</td>
     <td>${bx("b",cOrds+" orders")}</td>
     <td><div class="act">
@@ -1414,7 +1495,7 @@ function pCustomers(){
       <button class="btn xs" data-action="cust-history" data-i="${S.customers.indexOf(c)}">📋</button>
       <button class="btn xs dn" data-action="del-customer" data-i="${S.customers.indexOf(c)}">🗑</button>
     </div></td>
-  </tr>`;}).join(""):`<tr class="empty"><td colspan="9">No customers yet</td></tr>`}
+  </tr>`;}).join(""):`<tr class="empty"><td colspan="10">No customers yet</td></tr>`}
   </tbody></table></div>`;
 }
 
@@ -2101,6 +2182,58 @@ function openProcModal(idx,prefVendor="",prefQty="",prefUnit="kg"){
   </div>`);
 }
 
+// PO Detail View Modal
+function openProcDetailModal(idx){
+  var r=S.proc[idx];if(!r)return;
+  function row(label,val){
+    if(!val||val==="—"||val==="")return"";
+    return'<div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px solid var(--bd)">'
+      +'<div style="min-width:140px;font-size:11.5px;color:var(--hx)">'+label+'</div>'
+      +'<div style="font-size:12.5px;color:var(--tx);font-weight:500">'+val+'</div>'
+      +'</div>';
+  }
+  // Try to match dispatcher from DB
+  var disp=null;
+  if(r.agentName&&S.dispatchers){disp=S.dispatchers.find(function(d){return d.name.toLowerCase()===r.agentName.toLowerCase();});}
+  openM('<div class="modal wd">'
+    +'<div class="mhdr"><div class="mtitle">Purchase Order — '+r.po+'</div><button class="mclose" data-action="close-m">✕</button></div>'
+    +'<div class="mbody">'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+    +'<div style="background:var(--S2);border-radius:var(--R);padding:10px 13px"><div style="font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px">Status</div><div>'+sbadge(r.status)+'</div></div>'
+    +'<div style="background:var(--S2);border-radius:var(--R);padding:10px 13px"><div style="font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px">Payment</div><div>'+(r.paid?bx("g","Paid"):bx("r","Unpaid"))+'</div></div>'
+    +'</div>'
+    +'<div style="background:var(--S);border:1px solid var(--bd);border-radius:var(--R);padding:4px 14px;margin-bottom:10px">'
+    +row("PO Number",r.po)
+    +row("Vendor / Product",r.vendor)
+    +row("Quantity",r.qty)
+    +row("Delay Flag",r.flag)
+    +row("Aging",r.aging)
+    +'</div>'
+    +'<div style="font-size:11px;font-weight:700;color:var(--b2);text-transform:uppercase;letter-spacing:1px;margin:10px 0 4px">📅 Dates</div>'
+    +'<div style="background:var(--S);border:1px solid var(--bd);border-radius:var(--R);padding:4px 14px;margin-bottom:10px">'
+    +row("PO Opening Date",fd(r.poOpen))
+    +row("PO Order Date",fd(r.poDate))
+    +row("PO Expiry Date",fd(r.poExpiry))
+    +row("Due / Expected Date",fd(r.due))
+    +row("GRN / Received Date",fd(r.grn))
+    +'</div>'
+    +'<div style="font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:1px;margin:10px 0 4px">🚚 Dispatch Details</div>'
+    +'<div style="background:var(--S);border:1px solid var(--bd);border-radius:var(--R);padding:4px 14px;margin-bottom:10px">'
+    +row("Dispatched From",r.fromPlace)
+    +row("Delivered To",r.toPlace)
+    +row("Agent / Transporter",r.agentName)
+    +row("Agent Phone",r.agentPhone)
+    +(disp?(row("Alt Phone",disp.altPhone)+row("Agent Type",disp.type)):"")
+    +'</div>'
+    +(r.notes?('<div style="background:var(--S2);border-radius:var(--R);padding:10px 13px;font-size:12.5px"><strong>Notes:</strong> '+r.notes+'</div>'):"")
+    +'</div>'
+    +'<div class="mfoot">'
+    +'<button class="btn" data-action="close-m">Close</button>'
+    +(r.status==="on process"?'<button class="btn gr" data-action="recv-proc" data-i="'+idx+'">✓ Receive PO</button>':"")
+    +'<button class="btn te" data-action="edit-proc" data-i="'+idx+'">✏ Edit</button>'
+    +'</div></div>');
+}
+
 // Receive PO Modal
 function openRecvModal(idx){
   const r=S.proc[idx];
@@ -2481,19 +2614,21 @@ function openVendorModal(idx){
 // Customer Modal
 function openCustomerModal(idx){
   const c=idx!=null?S.customers[idx]:{};
-  openM(`<div class="modal">
-    <div class="mhdr"><div class="mtitle">${idx==null?"Add":"Edit"} Customer</div><button class="mclose" data-action="close-m">✕</button></div>
-    <div class="mbody">
-      <div class="fg"><label class="fl">Customer / Company Name</label><input class="fi" id="m-cname" value="${c.name||""}" placeholder="e.g. Sharma Traders"></div>
-      <div class="f2"><div class="fg"><label class="fl">Contact Person</label><input class="fi" id="m-ccontact" value="${c.contact||""}" placeholder="Name"></div>
-      <div class="fg"><label class="fl">Phone</label><input class="fi" id="m-cphone" value="${c.phone||""}" placeholder="9876543210" type="tel"></div></div>
-      <div class="f2"><div class="fg"><label class="fl">Email</label><input class="fi" id="m-cemail" value="${c.email||""}" placeholder="customer@email.com" type="email"></div>
-      <div class="fg"><label class="fl">City</label><input class="fi" id="m-ccity" value="${c.city||""}" placeholder="Mumbai"></div></div>
-      <div class="fg"><label class="fl">Credit Days</label><input class="fi" id="m-ccredit" type="number" min="0" value="${c.creditDays||0}" placeholder="0 = Cash"></div>
-      <div class="fg"><label class="fl">Notes</label><textarea class="fi" id="m-cnotes">${c.notes||""}</textarea></div>
-    </div>
-    <div class="mfoot"><button class="btn" data-action="close-m">Cancel</button><button class="btn pr" data-action="save-customer" data-i="${idx!=null?idx:""}">Save Customer</button></div>
-  </div>`);
+  openM('<div class="modal wd">'
+    +'<div class="mhdr"><div class="mtitle">'+(idx==null?"Add":"Edit")+' Customer</div><button class="mclose" data-action="close-m">✕</button></div>'
+    +'<div class="mbody">'
+    +'<div class="fg"><label class="fl">Customer / Company Name</label><input class="fi" id="m-cname" value="'+(c.name||"")+'" placeholder="e.g. Sharma Traders"></div>'
+    +'<div class="f2"><div class="fg"><label class="fl">Contact Person</label><input class="fi" id="m-ccontact" value="'+(c.contact||"")+'" placeholder="Name"></div>'
+    +'<div class="fg"><label class="fl">Phone</label><input class="fi" id="m-cphone" type="tel" value="'+(c.phone||"")+'" placeholder="9876543210"></div></div>'
+    +'<div class="f2"><div class="fg"><label class="fl">Email</label><input class="fi" id="m-cemail" type="email" value="'+(c.email||"")+'" placeholder="customer@email.com"></div>'
+    +'<div class="fg"><label class="fl">City</label><input class="fi" id="m-ccity" value="'+(c.city||"")+'" placeholder="Mumbai"></div></div>'
+    +'<div class="fg"><label class="fl">Full Address</label><textarea class="fi" id="m-caddress" placeholder="e.g. 123 MG Road, Andheri East, Mumbai - 400069">'+(c.address||"")+'</textarea></div>'
+    +'<div class="f2"><div class="fg"><label class="fl">GSTIN</label><input class="fi" id="m-cgstin" value="'+(c.gstin||"")+'" placeholder="e.g. 27AABCU9603R1ZX" style="font-family:monospace;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()"></div>'
+    +'<div class="fg"><label class="fl">Credit Days</label><input class="fi" id="m-ccredit" type="number" min="0" value="'+(c.creditDays||0)+'" placeholder="0 = Cash"></div></div>'
+    +'<div class="fg"><label class="fl">Notes</label><textarea class="fi" id="m-cnotes">'+(c.notes||"")+'</textarea></div>'
+    +'</div>'
+    +'<div class="mfoot"><button class="btn" data-action="close-m">Cancel</button><button class="btn pr" data-action="save-customer" data-i="'+(idx!=null?idx:"")+'">Save Customer</button></div>'
+    +'</div>');
 }
 
 // Customer History Modal
@@ -2587,29 +2722,141 @@ function onLotModalProdChange(){
   if(hint)hint.textContent=inv?"Current stock: "+N(inv.qty)+" "+unit:"No inventory entry yet";
 }
 
+// Order Detail View Modal
+function openOrderDetailModal(idx){
+  var o=S.ord[idx];if(!o)return;
+  var itemList=o.items&&o.items.length?o.items:[{product:o.product,lot:o.lot,qty:o.qty,unit:o.unit,price:o.price,value:o.value,orderType:o.orderType,pktType:o.pktType}];
+  function drow(lbl,val){
+    if(!val||val==="—"||val==="")return"";
+    return'<div style="display:flex;gap:12px;padding:7px 0;border-bottom:1px solid var(--bd)">'
+      +'<div style="min-width:140px;font-size:11.5px;color:var(--hx)">'+lbl+'</div>'
+      +'<div style="font-size:12.5px;color:var(--tx);font-weight:500">'+val+'</div></div>';
+  }
+  var itemsHtml='<div class="tw" style="margin-top:0"><table><thead><tr>'
+    +'<th>#</th><th>Product</th><th>Lot</th><th>Type</th><th>Prod Qty</th><th>Pkt Qty</th><th>Unit</th><th>Price</th><th>Value</th>'
+    +'</tr></thead><tbody>';
+  itemList.forEach(function(it,n){
+    var invQty=it.invQty!=null?N(it.invQty):(it.orderType!=="packet"?N(it.qty):"—");
+    var pktQty=it.pktQty>0?N(it.pktQty):(it.orderType==="packet"?N(it.qty):"—");
+    itemsHtml+='<tr class="dr">'
+      +'<td class="d">'+(n+1)+'</td>'
+      +'<td><strong>'+(it.product||"—")+'</strong></td>'
+      +'<td class="mo">'+(it.lot||"—")+'</td>'
+      +'<td>'+bx(it.orderType==="packet"?"b":"g",it.orderType||"product")+'</td>'
+      +'<td>'+(invQty)+'</td>'
+      +'<td>'+(pktQty)+'</td>'
+      +'<td class="d">'+(it.unit||"—")+'</td>'
+      +'<td class="d">'+(it.price?CFG.currency+N(it.price):"—")+'</td>'
+      +'<td class="d" style="color:var(--g2);font-weight:600">'+(it.value?CFG.currency+N(it.value):"—")+'</td>'
+      +'</tr>';
+  });
+  itemsHtml+='</tbody></table></div>';
+  openM('<div class="modal lg">'
+    +'<div class="mhdr">'
+    +'<div style="display:flex;align-items:center;gap:10px">'
+    +'<div class="mtitle">Order — '+o.id+'</div>'
+    +sbadge(o.status)
+    +'</div>'
+    +'<button class="mclose" data-action="close-m">✕</button>'
+    +'</div>'
+    +'<div class="mbody">'
+    // Summary cards
+    +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">'
+    +'<div style="background:var(--S2);border-radius:var(--R);padding:10px 12px;text-align:center"><div style="font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px">Customer</div><div style="font-size:13px;font-weight:600;margin-top:3px">'+o.customer+'</div></div>'
+    +'<div style="background:var(--S2);border-radius:var(--R);padding:10px 12px;text-align:center"><div style="font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px">Order Date</div><div style="font-size:13px;font-weight:600;margin-top:3px">'+fd(o.date)+'</div></div>'
+    +'<div style="background:var(--S2);border-radius:var(--R);padding:10px 12px;text-align:center"><div style="font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px">Total Value</div><div style="font-size:13px;font-weight:700;color:var(--g2);margin-top:3px">'+(o.value?CFG.currency+N(o.value):"—")+'</div></div>'
+    +'<div style="background:var(--S2);border-radius:var(--R);padding:10px 12px;text-align:center"><div style="font-size:10px;color:var(--hx);text-transform:uppercase;letter-spacing:.8px">Items</div><div style="font-size:13px;font-weight:600;margin-top:3px">'+itemList.length+'</div></div>'
+    +'</div>'
+    // Items table
+    +'<div style="font-size:11px;font-weight:700;color:var(--at);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">🛍 Order Items</div>'
+    +itemsHtml
+    // Order details
+    +'<div style="font-size:11px;font-weight:700;color:var(--b2);text-transform:uppercase;letter-spacing:1px;margin:12px 0 4px">📋 Order Details</div>'
+    +'<div style="background:var(--S);border:1px solid var(--bd);border-radius:var(--R);padding:4px 14px;margin-bottom:10px">'
+    +drow("Order ID",o.id)
+    +drow("Delivery Status",o.delivery&&o.delivery!=="—"?o.delivery:"")
+    +drow("Order Expiry",o.expiry?fd(o.expiry):"")
+    +drow("Appointment Date",o.apptDate?fd(o.apptDate):"")
+    +drow("Dispatch Date",o.dispatchDate?fd(o.dispatchDate):"")
+    +drow("Box Used",o.boxType&&o.boxQty>0?o.boxType+" × "+o.boxQty:"")
+    +'</div>'
+    // Locations
+    +(o.fromLoc||o.toLoc||o.pickupName||o.deliveryName?(
+      '<div style="font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:1px;margin:12px 0 4px">📍 Locations & Contacts</div>'
+      +'<div style="background:var(--S);border:1px solid var(--bd);border-radius:var(--R);padding:4px 14px;margin-bottom:10px">'
+      +drow("Pickup From",o.fromLoc)
+      +drow("Pickup Contact",o.pickupName)
+      +drow("Pickup Phone",o.pickupPhone)
+      +drow("Deliver To",o.toLoc)
+      +drow("Delivery Contact",o.deliveryName)
+      +drow("Delivery Phone",o.deliveryPhone)
+      +'</div>'
+    ):"")
+    +(o.notes?('<div style="background:var(--S2);border-radius:var(--R);padding:10px 13px;font-size:12.5px"><strong>Notes:</strong> '+o.notes+'</div>'):"")
+    +'</div>'
+    +'<div class="mfoot">'
+    +'<button class="btn" data-action="close-m">Close</button>'
+    +'<button class="btn te" data-action="invoice-ord" data-i="'+idx+'">🧾 Invoice</button>'
+    +(o.status==="pending"?'<button class="btn gr" data-action="fulfill-ord" data-i="'+idx+'">✓ Fulfill</button>':"")
+    +(o.status!=="cancelled"?'<button class="btn" data-action="edit-ord" data-i="'+idx+'">✏ Edit</button>':"")
+    +'</div></div>');
+}
+
 // Invoice Modal
 function openInvoiceModal(idx){
-  const o=S.ord[idx];
-  openM(`<div class="modal wd">
-    <div class="mhdr"><div class="mtitle">Invoice — ${o.id}</div><button class="mclose" data-action="close-m">✕</button></div>
-    <div class="mbody">
-      <div class="inv-paper">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid #333">
-          <div><div class="inv-logo">FINEST</div><div style="font-size:11px;color:#888;margin-top:2px">Warehouse Management System</div></div>
-          <div style="text-align:right;font-size:12px;color:#555"><div><strong>Invoice #${o.id}</strong></div><div>Date: ${fd(o.date)}</div><div>Status: ${o.status.toUpperCase()}</div><div>Delivery: ${o.delivery||"—"}</div></div>
-        </div>
-        <div style="margin-bottom:14px;font-size:13px"><strong>Bill To:</strong> ${o.customer}</div>
-        <table class="inv-tbl"><thead><tr><th>Product</th><th>Type</th><th>Lot/Pack</th><th>Qty</th><th>Unit</th><th>Rate</th><th>Amount</th></tr></thead>
-        <tbody><tr><td>${o.product}</td><td>${o.orderType||"product"}</td><td>${o.lot||o.pktType||"—"}</td><td>${N(o.qty)}</td><td>${o.unit}</td><td>${o.price?CFG.currency+N(o.price):"—"}</td><td>${o.value?CFG.currency+N(o.value):"—"}</td></tr></tbody></table>
-        <div style="font-size:11px;color:#888;border-top:1px solid #ddd;padding-top:10px;margin-top:10px">
-          Stock after order: ${N(o.stockAfter)} ${o.unit}
-          ${o.notes?"<br>Notes: "+o.notes:""}
-          <br>Generated: ${fd(today())} · Finest Warehouse Management
-        </div>
-      </div>
-    </div>
-    <div class="mfoot"><button class="btn" data-action="close-m">Close</button><button class="btn pr" onclick="window.print()">🖨 Print Invoice</button></div>
-  </div>`);
+  var o=S.ord[idx];if(!o)return;
+  var itemList=o.items&&o.items.length?o.items:[{product:o.product,lot:o.lot,qty:o.qty,unit:o.unit,price:o.price,value:o.value,orderType:o.orderType,pktType:o.pktType,invQty:null,pktQty:null}];
+  var itemRows=itemList.map(function(it,n){
+    var hasInv=it.invQty>0||(it.orderType!=="packet"&&it.qty>0);
+    var hasPkt=it.pktQty>0||(it.orderType==="packet"&&it.qty>0);
+    var rows="";
+    if(hasInv){
+      var q=it.invQty!=null?it.invQty:it.qty;
+      var u=it.invUnit||it.unit;
+      rows+='<tr><td>'+(n+1)+'</td><td>'+it.product+'</td><td style="font-family:monospace">'+(it.lot||"—")+'</td><td>Product</td><td>'+N(q)+' '+u+'</td><td>'+(it.price?CFG.currency+N(it.price):"—")+'</td><td>'+(it.value&&!it.pktQty?CFG.currency+N(it.value):it.price&&q?CFG.currency+N(q*it.price):"—")+'</td></tr>';
+    }
+    if(hasPkt){
+      var q=it.pktQty!=null?it.pktQty:it.qty;
+      var u=it.pktUnit||it.unit;
+      rows+='<tr><td>'+(hasInv?"":n+1)+'</td><td>'+it.product+' (Packet)</td><td style="font-family:monospace">'+(it.pktType||"—")+'</td><td>Packet</td><td>'+N(q)+' '+u+'</td><td>'+(it.price?CFG.currency+N(it.price):"—")+'</td><td>'+(it.price?CFG.currency+N(q*it.price):"—")+'</td></tr>';
+    }
+    return rows;
+  }).join("");
+  var totalAmt=o.value||itemList.reduce(function(a,it){return a+(it.value||0);},0);
+  var cust=S.customers.find(function(c){return c.name===o.customer;})||{};
+  openM('<div class="modal wd">'
+    +'<div class="mhdr"><div class="mtitle">Invoice — '+o.id+'</div><button class="mclose" data-action="close-m">✕</button></div>'
+    +'<div class="mbody"><div class="inv-paper">'
+    // Header
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid #333">'
+    +'<div><div class="inv-logo">FINEST</div><div style="font-size:11px;color:#888;margin-top:2px">Warehouse Management System</div></div>'
+    +'<div style="text-align:right;font-size:12px;color:#555">'
+    +'<div><strong>Invoice #'+o.id+'</strong></div>'
+    +'<div>Date: '+fd(o.date)+'</div>'
+    +'<div>Status: '+o.status.toUpperCase()+'</div>'
+    +(o.dispatchDate?'<div>Dispatch: '+fd(o.dispatchDate)+'</div>':"")
+    +'</div></div>'
+    // Bill To
+    +'<div style="margin-bottom:14px;font-size:13px">'
+    +'<strong>Bill To:</strong> '+o.customer
+    +(cust.address?'<br><span style="font-size:11.5px;color:#666">'+cust.address+'</span>':"")
+    +(cust.gstin?'<br><span style="font-size:11.5px;color:#666">GSTIN: '+cust.gstin+'</span>':"")
+    +(cust.phone?'<br><span style="font-size:11.5px;color:#666">📞 '+cust.phone+'</span>':"")
+    +'</div>'
+    // Items table — ALL items
+    +'<table class="inv-tbl"><thead><tr><th>#</th><th>Product</th><th>Lot / Pack Type</th><th>Type</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>'
+    +'<tbody>'+itemRows+'</tbody></table>'
+    // Total
+    +(totalAmt?'<div style="text-align:right;margin-top:10px;padding-top:8px;border-top:2px solid #333;font-size:14px"><strong>Total: '+CFG.currency+N(totalAmt)+'</strong></div>':"")
+    // Footer
+    +'<div style="font-size:11px;color:#888;border-top:1px solid #ddd;padding-top:10px;margin-top:10px">'
+    +(o.fromLoc||o.toLoc?'Dispatch: '+(o.fromLoc||"—")+' → '+(o.toLoc||"—")+'<br>':"")
+    +(o.notes?"Notes: "+o.notes+"<br>":"")
+    +'Generated: '+fd(today())+' · Finest Warehouse Management'
+    +'</div>'
+    +'</div></div>'
+    +'<div class="mfoot"><button class="btn" data-action="close-m">Close</button><button class="btn pr" onclick="window.print()">🖨 Print Invoice</button></div>'
+    +'</div>');
 }
 
 // ─── ORDER HELPERS ────────────────────────────
@@ -2706,6 +2953,7 @@ function handleClick(e){
     case"edit-proc":openProcModal(+el.dataset.i);break;
     case"del-proc":if(confirm("Delete this PO?")){_pushUndo("Delete PO",["proc"]);S.proc.splice(+el.dataset.i,1);schedSave();render();toast("Deleted — press ↩ Undo to restore","info");}break;
     case"save-proc":saveProc(el.dataset.i===""?null:+el.dataset.i);break;
+    case"view-proc":openProcDetailModal(+el.dataset.i);break;
     case"recv-proc":openRecvModal(+el.dataset.i);break;
     case"do-recv":doRecv(+el.dataset.i);break;
     case"open-order":OT="product";openOrderModal(null);break;
@@ -2721,7 +2969,17 @@ function handleClick(e){
     case"fulfill-ord":{var fo=S.ord[+el.dataset.i];fo.status="fulfilled";logHistory("fulfill_order",fo.customer,"Order="+fo.id+" fulfilled");schedSave();render();toast("Order fulfilled ✓","ok");}break;
     case"dispatch-ord":{var dfo=S.ord[+el.dataset.i];dfo.delivery="dispatched";logHistory("dispatch_order",dfo.customer,"Order="+dfo.id+" dispatched");schedSave();render();toast("Marked as dispatched 🚚","ok");}break;
     case"save-ord":saveOrder(el.dataset.i===""?null:+el.dataset.i);break;
+    case"view-ord":openOrderDetailModal(+el.dataset.i);break;
     case"invoice-ord":openInvoiceModal(+el.dataset.i);break;
+    case"open-disp":openDispatcherModal(null);break;
+    case"edit-disp":openDispatcherModal(+el.dataset.i);break;
+    case"del-disp":if(confirm("Delete dispatcher?")){
+      _pushUndo("Delete dispatcher",["dispatchers"]);
+      (S.dispatchers||[]).splice(+el.dataset.i,1);
+      schedSave();render();toast("Deleted — press ↩ Undo to restore","info");}
+    break;
+    case"save-disp":saveDispatcher(el.dataset.i===""?null:+el.dataset.i);break;
+    case"export-disp":exportTableLabeled(S.dispatchers||[],"dispatchers",["name","type","contact","phone","altPhone","fromPlace","toPlace","notes"],{name:"Name",type:"Type",contact:"Contact Person",phone:"Phone",altPhone:"Alt Phone",fromPlace:"Dispatch From",toPlace:"Delivers To",notes:"Notes"});break;
     case"open-vendor":openVendorModal(null);break;
     case"edit-vendor":openVendorModal(+el.dataset.i);break;
     case"del-vendor":if(confirm("Delete vendor?")){
@@ -3310,7 +3568,7 @@ function saveVendor(idx){
 function saveCustomer(idx){
   var oldName=idx!=null?S.customers[idx].name:"";
   if(idx!=null)_pushUndo("Edit customer",["customers","ord"]);
-  const c={id:idx!=null?S.customers[idx].id:"C"+uid(),name:gv("m-cname").trim(),contact:gv("m-ccontact").trim(),phone:gv("m-cphone").trim(),email:gv("m-cemail").trim(),city:gv("m-ccity").trim(),creditDays:parseInt(gv("m-ccredit"))||0,notes:gv("m-cnotes").trim()};
+  const c={id:idx!=null?S.customers[idx].id:"C"+uid(),name:gv("m-cname").trim(),contact:gv("m-ccontact").trim(),phone:gv("m-cphone").trim(),email:gv("m-cemail").trim(),city:gv("m-ccity").trim(),address:gv("m-caddress").trim(),gstin:gv("m-cgstin").trim().toUpperCase(),creditDays:parseInt(gv("m-ccredit"))||0,notes:gv("m-cnotes").trim()};
   if(!c.name){toast("Customer name required","warn");return;}
   if(c.name.length>150){toast("Customer name too long (max 150 chars)","warn");return;}
   if(idx==null)S.customers.push(c);else S.customers[idx]=c;
@@ -3542,6 +3800,7 @@ function pProc(){
     <td>${r.paid?bx("g","Paid"):bx("r","Unpaid")}</td>
     <td class="d" style="max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.notes||"—"}</td>
     <td><div class="act">
+      <button class="btn xs te" data-action="view-proc" data-i="${S.proc.indexOf(r)}" title="View full details">👁</button>
       ${r.status==="on process"?`<button class="btn xs gr" data-action="recv-proc" data-i="${S.proc.indexOf(r)}">✓ Recv</button>`:""}
       <button class="btn xs" data-action="edit-proc" data-i="${S.proc.indexOf(r)}">✏</button>
       <button class="btn xs dn" data-action="del-proc" data-i="${S.proc.indexOf(r)}">🗑</button>
@@ -3584,7 +3843,7 @@ function pOrders(){
     const itemList=r.items&&r.items.length?r.items:[{product:r.product,qty:r.qty,unit:r.unit}];
     const firstItem=itemList[0]||{};
     return`<tr class="dr">
-    <td class="mo">${r.id}</td>
+    <td class="mo"><button class="btn xs te" data-action="view-ord" data-i="${S.ord.indexOf(r)}" style="font-family:monospace;font-weight:600">${r.id}</button></td>
     <td><strong>${r.customer}</strong></td>
     <td>${itemList.length>1
       ?`<div style="font-size:11.5px"><strong>${itemList.length} items</strong><div style="color:var(--hx);font-size:10.5px;margin-top:1px">${itemList.slice(0,2).map(it=>it.product).join(", ")}${itemList.length>2?" +more":""}</div></div>`
@@ -3656,7 +3915,7 @@ function pPattri(){
   html+='<input class="si" placeholder="🔍 Search product…" value="'+(FV.pattri||"")+'" data-filter="pattri">';
   html+='<div class="ml btn-group"><button class="btn sm" data-action="export-pattri">⬇ Export</button><button class="btn sm te" data-action="import-pattri">⬆ Import</button><button class="btn sm pr" data-action="open-pattri">+ Add Pattri Product</button></div>';
   html+='</div>';
-  html+='<div class="tw"><table><thead><tr><th>#</th><th>Product Name</th><th>Net Weight</th><th>Unit</th><th>Notes</th><th>Actions</th></tr></thead><tbody>';
+  html+='<div class="tw"><table><thead><tr><th>#</th><th>Product Name</th><th>Net Weight</th><th>Unit</th><th>Pack Type</th><th>Notes</th><th>Actions</th></tr></thead><tbody>';
   if(rows.length){
     rows.forEach(function(r,i){
       html+='<tr class="dr">';
@@ -3664,6 +3923,7 @@ function pPattri(){
       html+='<td><strong>'+r.name+'</strong></td>';
       html+='<td><strong style="color:var(--at)">'+N(r.netWeight||0)+'</strong></td>';
       html+='<td class="d">'+r.unit+'</td>';
+      html+='<td>'+( r.packType?bx("b",r.packType):"<span class=\"d\">—</span>")+'</td>';
       html+='<td class="d">'+(r.notes||"—")+'</td>';
       html+='<td><div class="act">';
       html+='<button class="btn xs" data-action="edit-pattri" data-i="'+S.pattri.indexOf(r)+'">✏ Edit</button>';
@@ -3672,7 +3932,7 @@ function pPattri(){
       html+='</div></td></tr>';
     });
   } else {
-    html+='<tr class="empty"><td colspan="6">No pattri products found</td></tr>';
+    html+='<tr class="empty"><td colspan="7">No pattri products found</td></tr>';
   }
   html+='</tbody></table></div>';
   return html;
@@ -3680,13 +3940,24 @@ function pPattri(){
 
 function openPattriModal(idx){
   var r=idx!=null?S.pattri[idx]:{};
-  openM('<div class="modal">'
+  // Collect existing pack types from pattri + pkt for datalist
+  var existingPackTypes=[...new Set([
+    ...(S.pattri||[]).map(function(p){return p.packType;}).filter(Boolean),
+    ...(S.pkt||[]).map(function(p){return p.type;}).filter(Boolean)
+  ])].sort();
+  var packTypeOpts=existingPackTypes.map(function(t){return'<option value="'+t+'">';}).join("");
+  openM('<div class="modal wd">'
     +'<div class="mhdr"><div class="mtitle">'+(idx==null?"Add":"Edit")+' Pattri Product</div><button class="mclose" data-action="close-m">✕</button></div>'
     +'<div class="mbody">'
     +'<div class="fg"><label class="fl">Product Name</label><input class="fi" id="m-pt-name" value="'+(r.name||"")+'" placeholder="e.g. Thoothukudi Macaroon" list="pt-prod-list">'
     +'<datalist id="pt-prod-list">'+S.inv.map(function(p){return'<option value="'+p.name+'">';}).join("")+'</datalist></div>'
-    +'<div class="f2"><div class="fg"><label class="fl">Net Weight</label><input class="fi" id="m-pt-wt" type="number" min="0" step="0.001" value="'+(r.netWeight||0)+'" placeholder="0"></div>'
-    +'<div class="fg"><label class="fl">Unit</label><select class="fi" id="m-pt-unit"><option value="kg" '+(r.unit==="kg"?"selected":"")+'>kg</option><option value="pcs" '+(r.unit==="pcs"?"selected":"")+'>pcs</option><option value="gm" '+(r.unit==="gm"?"selected":"")+'>gm</option></select></div></div>'
+    +'<div class="f2"><div class="fg"><label class="fl">Net Weight / Quantity</label><input class="fi" id="m-pt-wt" type="number" min="0" step="0.001" value="'+(r.netWeight||0)+'" placeholder="0"></div>'
+    +'<div class="fg"><label class="fl">Unit</label><select class="fi" id="m-pt-unit"><option value="kg" '+(r.unit==="kg"?"selected":"")+'>kg</option><option value="pcs" '+(r.unit==="pcs"?"selected":"")+'>pcs</option><option value="gm" '+(r.unit==="gm"?"selected":"")+'>gm</option><option value="litre">litre</option></select></div></div>'
+    +'<div class="fg"><label class="fl">Pack Type</label>'
+    +'<input class="fi" id="m-pt-packtype" value="'+(r.packType||"")+'" placeholder="e.g. small packets, 50gm pack, big box…" list="pt-packtype-list">'
+    +'<datalist id="pt-packtype-list"><option value="small packets"><option value="big packets"><option value="medium packets"><option value="export box"><option value="retail pack">'+packTypeOpts+'</datalist>'
+    +'<div style="font-size:10.5px;color:var(--hx);margin-top:3px">Type to create a new pack type or select existing</div>'
+    +'</div>'
     +'<div class="fg"><label class="fl">Notes</label><input class="fi" id="m-pt-notes" value="'+(r.notes||"")+'" placeholder="Optional notes"></div>'
     +'</div>'
     +'<div class="mfoot"><button class="btn" data-action="close-m">Cancel</button><button class="btn pr" data-action="save-pattri" data-i="'+(idx!=null?idx:"")+'">Save</button></div>'
@@ -3710,9 +3981,9 @@ function openAdjPattriModal(idx){
 }
 
 function savePattri(idx){
-  var nm=gv("m-pt-name").trim(),wt=parseFloat(gv("m-pt-wt"))||0,unit=gv("m-pt-unit"),notes=gv("m-pt-notes").trim();
+  var nm=gv("m-pt-name").trim(),wt=parseFloat(gv("m-pt-wt"))||0,unit=gv("m-pt-unit"),packType=gv("m-pt-packtype").trim(),notes=gv("m-pt-notes").trim();
   if(!nm){toast("Product name required","warn");return;}
-  var r={id:idx!=null?S.pattri[idx].id:"PT"+uid(),name:nm,netWeight:wt,unit:unit,notes:notes};
+  var r={id:idx!=null?S.pattri[idx].id:"PT"+uid(),name:nm,netWeight:wt,unit:unit,packType:packType,notes:notes};
   if(idx==null)S.pattri.push(r);else S.pattri[idx]=r;
   logHistory(idx==null?"add_pattri":"edit_pattri",r.name,"netWeight="+N(r.netWeight)+" "+r.unit);
   closeM();schedSave();render();toast(idx==null?"Pattri product added ✓":"Pattri updated ✓","ok");
@@ -4285,7 +4556,7 @@ function yesterday(){
 
 // ─── BULK ORDER MODAL ────────────────────────────────────────
 function openBulkOrderModal(){
-  var custOpts=S.customers.map(function(c){return '<option value="'+c.name+'">'+c.name+'</option>';}).join("");
+  var custOpts=S.customers.map(function(c){return '<option value="'+c.name+'" data-phone="'+(c.phone||'')+'">'+c.name+(c.city?' ('+c.city+')':'')+'</option>';}).join("");
   var invOpts='<option value="">— Select —</option>'+S.inv.map(function(r,i){
     return '<option value="inv:'+i+'">'+r.name+' — '+r.lot+' ('+N(r.qty)+' '+r.unit+')</option>';
   }).join("");
@@ -4314,8 +4585,10 @@ function openBulkOrderModal(){
     +'<div class="fg"><label class="fl">Order ID (editable)</label>'
     +'<input class="fi" id="bo-id" value="'+autoId+'" placeholder="'+autoId+'" style="color:var(--at);font-family:monospace;font-weight:600"></div>'
     +'<div class="fg"><label class="fl">Customer Name</label>'
-    +'<input class="fi" id="bo-cust" placeholder="Customer name" list="bo-cust-list">'
-    +'<datalist id="bo-cust-list">'+custOpts+'</datalist></div>'
+    +'<select class="fi" id="bo-cust" onchange="fillBulkOrderFromCustomer()">'
+    +'<option value="">— Select Customer —</option>'+custOpts+'</select>'
+    +'<input class="fi" id="bo-cust-txt" placeholder="Or type new customer name" style="margin-top:4px;font-size:12px">'
+    +'</div>'
     +'<div class="fg"><label class="fl">Order Date</label>'
     +'<input class="fi" id="bo-date" type="date" value="'+window.today()+'"></div>'
     +'<div class="fg"><label class="fl">Status</label>'
@@ -4329,11 +4602,24 @@ function openBulkOrderModal(){
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
     +'<div class="fg"><label class="fl">Pickup / From Location</label><input class="fi" id="bo-from" placeholder="e.g. Mumbai Warehouse"></div>'
     +'<div class="fg"><label class="fl">Delivery / To Location</label><input class="fi" id="bo-to" placeholder="e.g. Delhi Distributor"></div></div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:4px">'
-    +'<div class="fg"><label class="fl">Pickup Contact</label><input class="fi" id="bo-pickup-name" placeholder="Name"></div>'
-    +'<div class="fg"><label class="fl">Pickup Phone</label><input class="fi" id="bo-pickup-ph" type="tel" placeholder="Phone"></div>'
-    +'<div class="fg"><label class="fl">Delivery Contact</label><input class="fi" id="bo-del-name" placeholder="Name"></div>'
-    +'<div class="fg"><label class="fl">Delivery Phone</label><input class="fi" id="bo-del-ph" type="tel" placeholder="Phone"></div></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px">'
+    +'<div class="fg"><label class="fl">Pickup Contact (select or type)</label>'
+    +'<select class="fi" id="bo-pickup-sel" onchange="fillBulkContact(\'pickup\')" style="margin-bottom:4px">'
+    +'<option value="">— Select from Dispatchers —</option>'
+    +(S.dispatchers||[]).map(function(d){return'<option value="'+d.name+':'+d.phone+'">'+(d.contact||d.name)+' · '+d.phone+(d.fromPlace?' ('+d.fromPlace+')':'')+'</option>';}).join('')
+    +'</select>'
+    +'<input class="fi" id="bo-pickup-name" placeholder="Contact name" style="margin-bottom:4px">'
+    +'<input class="fi" id="bo-pickup-ph" type="tel" placeholder="Phone">'
+    +'</div>'
+    +'<div class="fg"><label class="fl">Delivery Contact (select or type)</label>'
+    +'<select class="fi" id="bo-del-sel" onchange="fillBulkContact(\'delivery\')" style="margin-bottom:4px">'
+    +'<option value="">— Select from Dispatchers —</option>'
+    +(S.dispatchers||[]).map(function(d){return'<option value="'+d.name+':'+d.phone+'">'+(d.contact||d.name)+' · '+d.phone+(d.toPlace?' ('+d.toPlace+')':'')+'</option>';}).join('')
+    +(S.customers||[]).map(function(c){return'<option value="'+c.contact+':'+c.phone+'">'+c.name+' · '+(c.phone||'no phone')+'</option>';}).join('')
+    +'</select>'
+    +'<input class="fi" id="bo-del-name" placeholder="Contact name" style="margin-bottom:4px">'
+    +'<input class="fi" id="bo-del-ph" type="tel" placeholder="Phone">'
+    +'</div></div>'
 
     // ── Row 2: Box Allocation
     +'<div style="background:var(--S2);border:1px solid var(--bd);border-radius:var(--R);padding:12px;margin-bottom:10px">'
@@ -4378,6 +4664,41 @@ function openBulkOrderModal(){
 
   window._boRowCount=rowCount;
   setTimeout(updateBulkOrderTotal, 60);
+}
+
+function fillBulkOrderFromCustomer(){
+  var sel=document.getElementById("bo-cust");
+  var txt=document.getElementById("bo-cust-txt");
+  var toInp=document.getElementById("bo-to");
+  var delName=document.getElementById("bo-del-name");
+  var delPh=document.getElementById("bo-del-ph");
+  if(!sel)return;
+  var name=sel.value;
+  if(txt)txt.value=name;
+  var cust=S.customers.find(function(c){return c.name===name;});
+  if(cust){
+    if(toInp&&cust.city)toInp.value=cust.city;
+    if(delName&&cust.contact)delName.value=cust.contact;
+    if(delPh&&cust.phone)delPh.value=cust.phone;
+  }
+}
+function fillBulkContact(type){
+  var selId=type==="pickup"?"bo-pickup-sel":"bo-del-sel";
+  var nameId=type==="pickup"?"bo-pickup-name":"bo-del-name";
+  var phId=type==="pickup"?"bo-pickup-ph":"bo-del-ph";
+  var fromId=type==="pickup"?"bo-from":"bo-to";
+  var sel=document.getElementById(selId);
+  if(!sel||!sel.value)return;
+  var parts=sel.value.split(":");
+  var name=parts[0],phone=parts.slice(1).join(":");
+  var nameEl=document.getElementById(nameId);if(nameEl)nameEl.value=name;
+  var phEl=document.getElementById(phId);if(phEl)phEl.value=phone;
+  // Also fill from/to from dispatcher DB
+  var disp=(S.dispatchers||[]).find(function(d){return d.name===name||d.contact===name;});
+  if(disp){
+    var fromEl=document.getElementById(fromId);
+    if(fromEl){if(type==="pickup"&&disp.fromPlace)fromEl.value=disp.fromPlace;else if(type==="delivery"&&disp.toPlace)fromEl.value=disp.toPlace;}
+  }
 }
 
 function buildBulkOrderRow(i){
@@ -4536,7 +4857,9 @@ function updateBulkBoxInfo(){
 
 function saveBulkOrder(){
   var ordId=(document.getElementById("bo-id")||{value:""}).value.trim()||("ORD-"+String(S.seq).padStart(4,"0"));
-  var cust=(document.getElementById("bo-cust")||{value:""}).value.trim();
+  var custSel=(document.getElementById("bo-cust")||{value:""}).value.trim();
+  var custTxt=(document.getElementById("bo-cust-txt")||{value:""}).value.trim();
+  var cust=custSel||custTxt;
   var date=(document.getElementById("bo-date")||{value:""}).value||window.today();
   var status=(document.getElementById("bo-status")||{value:"pending"}).value;
   var notes=(document.getElementById("bo-notes")||{value:""}).value.trim();
@@ -4747,12 +5070,12 @@ function joinWorkspace(){
     _db.collection("warehouses").doc(wsId).get().then(function(wsnap){
       if(wsnap.exists()){
         var wd=wsnap.data();
-        var ks=["inv","pkt","proc","ord","lot","vendors","customers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"];
+        var ks=["inv","pkt","proc","ord","lot","vendors","customers","dispatchers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"];
         ks.forEach(function(k){if(wd[k])try{S[k]=JSON.parse(wd[k]);}catch(e){}});
         if(wd.seq)S.seq=wd.seq;
         if(wd.settings)try{Object.assign(CFG,JSON.parse(wd.settings));}catch(e){}
         // Sanitise
-        ["inv","pkt","proc","ord","lot","vendors","customers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"].forEach(function(k){if(!Array.isArray(S[k]))S[k]=[];});
+        ["inv","pkt","proc","ord","lot","vendors","customers","dispatchers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"].forEach(function(k){if(!Array.isArray(S[k]))S[k]=[];});
       }
       showApp();render();
       toast("✓ Joined workspace! Shared data loaded.","ok");
