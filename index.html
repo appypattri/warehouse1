@@ -1374,6 +1374,7 @@ function pDispatchers(){
   html+='<input class="si" placeholder="🔍 Search dispatcher or agent…" value="'+(FV.disp||"")+'" data-filter="disp">';
   html+='<div class="ml btn-group">';
   html+='<button class="btn sm" data-action="export-disp">⬇ Export</button>';
+  html+='<button class="btn sm te" data-action="import-disp">⬆ Import</button>';
   html+='<button class="btn sm pr" data-action="open-disp">+ Add Dispatcher</button>';
   html+='</div></div>';
   html+='<div class="tw"><table><thead><tr><th>#</th><th>Name / Company</th><th>Type</th><th>Contact Person</th><th>Phone</th><th>Alt Phone</th><th>Dispatch From</th><th>Delivers To</th><th>Notes</th><th>Actions</th></tr></thead><tbody>';
@@ -1441,6 +1442,68 @@ function saveDispatcher(idx){
   if(idx==null)S.dispatchers.push(d);else S.dispatchers[idx]=d;
   logHistory(idx==null?"add_dispatcher":"edit_dispatcher",d.name,"phone="+d.phone+", from="+d.fromPlace);
   closeM();schedSave();render();toast(idx==null?"Dispatcher added ✓":"Dispatcher updated ✓","ok");
+}
+
+function importDispatchers(){
+  var input=document.createElement("input");
+  input.type="file";input.accept=".csv";
+  input.onchange=function(e){
+    var file=e.target.files[0];if(!file)return;
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      try{
+        var lines=ev.target.result.split("\n").filter(function(l){return l.trim();});
+        if(lines.length<2){toast("CSV must have header + at least 1 row","warn");return;}
+        // Expected headers (case-insensitive): Name, Type, Contact Person, Phone, Alt Phone, Dispatch From, Delivers To, Notes
+        var headers=lines[0].split(",").map(function(h){return h.replace(/"/g,"").trim().toLowerCase();});
+        var colMap={};
+        var fieldMap={
+          "name":"name","type":"type",
+          "contact person":"contact","contact":"contact",
+          "phone":"phone","primary phone":"phone",
+          "alt phone":"altPhone","alternate phone":"altPhone","alt. phone":"altPhone",
+          "dispatch from":"fromPlace","from":"fromPlace","from place":"fromPlace","dispatched from":"fromPlace",
+          "delivers to":"toPlace","to":"toPlace","to place":"toPlace","delivery to":"toPlace",
+          "notes":"notes","vehicle details":"notes"
+        };
+        headers.forEach(function(h,i){
+          var key=fieldMap[h]||h;
+          colMap[key]=i;
+        });
+        var rows=lines.slice(1).map(function(line){
+          var vals=[];var cur="";var inQ=false;
+          for(var ci=0;ci<line.length;ci++){
+            if(line[ci]==='"'){inQ=!inQ;}
+            else if(line[ci]===","&&!inQ){vals.push(cur);cur="";}
+            else cur+=line[ci];
+          }
+          vals.push(cur);
+          function get(field){return colMap[field]!=null?(vals[colMap[field]]||"").replace(/"/g,"").trim():"";}
+          return{
+            id:"D"+uid(),
+            name:get("name"),type:get("type"),
+            contact:get("contact"),phone:get("phone"),
+            altPhone:get("altPhone"),
+            fromPlace:get("fromPlace"),toPlace:get("toPlace"),
+            notes:get("notes")
+          };
+        }).filter(function(r){return r.name;});
+        if(!rows.length){toast("No valid rows found — check CSV has a Name column","warn");return;}
+        if(!S.dispatchers)S.dispatchers=[];
+        var added=0,updated=0;
+        rows.forEach(function(d){
+          var existing=S.dispatchers.findIndex(function(x){return x.name.toLowerCase()===d.name.toLowerCase();});
+          if(existing>=0){S.dispatchers[existing]=Object.assign({},S.dispatchers[existing],d);updated++;}
+          else{S.dispatchers.push(d);added++;}
+        });
+        schedSave();render();
+        toast("Imported: "+added+" added, "+updated+" updated ✓","ok");
+        logHistory("import_dispatchers","CSV",""+rows.length+" dispatcher(s) imported");
+      }catch(err){toast("Import error: "+err.message,"warn");}
+    };
+    reader.readAsText(file);
+  };
+  input.click();
 }
 
 // ─── VENDORS ──────────────────────────────────
@@ -2573,18 +2636,17 @@ function updateOrderTotal(){
   for(var i=0;i<(window._ordRowCount||1);i++){
     var el=document.getElementById("ord-row-"+i);
     if(!el)continue;
-    var invQty =parseFloat((document.getElementById("oi-inv-qty-"+i)||{value:0}).value)||0;
+    // Value = Packet Qty × Price per unit (product qty not included in value)
     var pktQty =parseFloat((document.getElementById("oi-pkt-qty-"+i)||{value:0}).value)||0;
     var price  =parseFloat((document.getElementById("oi-price-"+i)||{value:0}).value)||0;
-    var rowQty = invQty + pktQty; // combined qty for value calc
-    var rowVal = rowQty * price;
+    var rowVal = pktQty * price;
     totalVal  += rowVal;
     var valEl = document.getElementById("oi-val-"+i);
-    if(valEl) valEl.value = rowQty>0&&price>0 ? "₹"+N(rowVal) : "";
+    if(valEl) valEl.value = pktQty>0&&price>0 ? "₹"+N(rowVal) : (pktQty===0&&price>0?"₹0":"");
   }
   var el=document.getElementById("ord-total-row");
   if(el&&totalVal>0){
-    el.innerHTML='<div class="pbox" style="margin-top:6px"><span style="color:var(--hx)">Order Total</span><span style="font-family:DM Mono,monospace;font-weight:600;color:var(--g2)">₹'+N(totalVal)+'</span></div>';
+    el.innerHTML='<div class="pbox" style="margin-top:6px"><span style="color:var(--hx)">Order Total (Packets)</span><span style="font-family:DM Mono,monospace;font-weight:600;color:var(--g2)">₹'+N(totalVal)+'</span></div>';
   } else if(el){el.innerHTML="";}
 }
 
@@ -2980,6 +3042,7 @@ function handleClick(e){
     break;
     case"save-disp":saveDispatcher(el.dataset.i===""?null:+el.dataset.i);break;
     case"export-disp":exportTableLabeled(S.dispatchers||[],"dispatchers",["name","type","contact","phone","altPhone","fromPlace","toPlace","notes"],{name:"Name",type:"Type",contact:"Contact Person",phone:"Phone",altPhone:"Alt Phone",fromPlace:"Dispatch From",toPlace:"Delivers To",notes:"Notes"});break;
+    case"import-disp":importDispatchers();break;
     case"open-vendor":openVendorModal(null);break;
     case"edit-vendor":openVendorModal(+el.dataset.i);break;
     case"del-vendor":if(confirm("Delete vendor?")){
@@ -3374,10 +3437,10 @@ function saveOrder(idx){
         pktQty:pktVal&&pktQty>0?pktQty:0,
         pktUnit:pktVal?(S.pkt[+pktVal.split(':')[1]]||{}).unit||"":"",
         qty:invQty, unit:ref.unit, // primary qty for legacy compat
-        price:price, value:(invQty+pktQty)*price,
+        price:price, value:pktQty>0?pktQty*price:0, // value = packet qty × price only
         stockAfter:avail-invQty
       });
-      totalVal+=(invQty+(pktQty>0?pktQty:0))*price;
+      totalVal+=pktQty>0?pktQty*price:0; // packet qty × price only
     } else if(pktVal&&pktQty>0&&!invVal){
       // Packet-only row
       var parts=pktVal.split(":");
@@ -4805,9 +4868,9 @@ function updateBulkOrderRow(i){
     }
   } else if(pktAvailEl){ pktAvailEl.textContent=""; }
 
-  // Row value
-  var rowQty=(invSrc?invQty:0)+(pktSrc?pktQty:0);
-  if(valEl)valEl.value=rowQty>0&&price>0?"₹"+N(rowQty*price):"";
+  // Row value = Packet Qty × Price only (product qty excluded from value)
+  var rowVal=pktSrc&&pktQty>0?pktQty*price:0;
+  if(valEl)valEl.value=rowVal>0?"₹"+N(rowVal):(pktSrc&&pktQty===0&&price>0?"₹0":"");
   updateBulkOrderTotal();
 }
 
@@ -4822,10 +4885,11 @@ function updateBulkOrderTotal(){
     var invQty=parseFloat((document.getElementById("bo-inv-qty-"+i)||{value:0}).value)||0;
     var pktQty=parseFloat((document.getElementById("bo-pkt-qty-"+i)||{value:0}).value)||0;
     var price =parseFloat((document.getElementById("bo-price-"+i)||{value:0}).value)||0;
-    var rowQty=(invSrc?invQty:0)+(pktSrc?pktQty:0);
-    if((invSrc||pktSrc)&&rowQty>0){total+=rowQty*price;itemCount++;}
+    // Value = packet qty × price only
+    var rowVal=pktSrc&&pktQty>0?pktQty*price:0;
+    if((invSrc||pktSrc)&&(invQty>0||pktQty>0)){total+=rowVal;itemCount++;}
     var valEl=document.getElementById("bo-val-"+i);
-    if(valEl&&rowQty>0&&price>0)valEl.value="₹"+N(rowQty*price);
+    if(valEl&&rowVal>0)valEl.value="₹"+N(rowVal);
   }
   var bar=document.getElementById("bo-total-bar");
   if(bar){
@@ -4901,8 +4965,9 @@ function saveBulkOrder(){
     if(invRef&&invQty>invRef.qty){errors.push("Row "+(i+1)+": product "+pName+" — only "+N(invRef.qty)+" "+invUnit+" avail");continue;}
     if(pktRef&&pktQty>pktRef.qty){errors.push("Row "+(i+1)+": packet "+pktRef.name+" — only "+N(pktRef.qty)+" "+pktUnit+" avail");continue;}
 
+    // Value = packet qty × price only (product qty tracks stock, not value)
     var rowQty=(invRef&&invQty>0?invQty:0)+(pktRef&&pktQty>0?pktQty:0);
-    var rowVal=rowQty*price;
+    var rowVal=pktRef&&pktQty>0?pktQty*price:0;
     items.push({
       invSrcKey:invSrc,pktSrcKey:pktSrc,
       product:pName,lot:pLot,pktType:pType,
@@ -4913,7 +4978,7 @@ function saveBulkOrder(){
       price:price,value:rowVal,
       stockAfter:invRef?invRef.qty-invQty:0
     });
-    totalVal+=rowVal;
+    totalVal+=rowVal; // rowVal already = pktQty × price
   }
 
   if(errors.length){toast("⚠ "+errors.slice(0,3).join(" | "),"warn");return;}
