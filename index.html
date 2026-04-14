@@ -235,12 +235,12 @@ td.mo{font-family:'DM Mono',monospace;font-size:12px;}
     </div>
     <div class="lsub">Power Operations, Effortlessly</div>
     <div class="ltitle">Welcome back</div>
-    <div class="ldesc">Your warehouse data is stored locally on this device. Click below to continue.</div>
+    <div class="ldesc">Sign in with your Google account to access your warehouse — inventory, orders, shelf life, and more. Your data syncs across all devices.</div>
     <button class="gbtn" onclick="doLogin()">
-      <span style="font-size:20px">🏭</span>
-      Open Operix
+      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="G" onerror="this.style.display='none'">
+      Continue with Google
     </button>
-    <div class="lfooter">Data saved locally in your browser. Works offline on any device.</div>
+    <div class="lfooter">Your data is private and synced via Google Firebase.<br>Works on any device — phone, tablet, computer.</div>
   </div>
 </div>
 
@@ -271,14 +271,14 @@ td.mo{font-family:'DM Mono',monospace;font-size:12px;}
     <div class="sb-foot">
       <div class="user-row">
         <img class="uavatar" id="u-avatar" src="" alt="">
-        <span class="uname" id="u-name">Local User</span>
+        <span class="uname" id="u-name"></span>
       </div>
       <div class="sync-row">
         <div style="display:flex;align-items:center;gap:4px">
           <div class="sdot ok" id="sync-dot"></div>
-          <span class="sync-lbl" id="sync-lbl">Ready</span>
+          <span class="sync-lbl" id="sync-lbl">Synced</span>
         </div>
-        <button class="lo-btn" onclick="doLogout()">Exit</button>
+        <button class="lo-btn" onclick="doLogout()">Sign out</button>
       </div>
     </div>
   </aside>
@@ -308,108 +308,164 @@ td.mo{font-family:'DM Mono',monospace;font-size:12px;}
 <div class="ov" id="ov" onclick="closeM()"></div>
 <div id="modal-wrap"></div>
 
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script>
 
 // ═══════════════════════════════════════════════════════
-//  STORAGE ENGINE — localStorage (no Firebase needed)
+//  FIREBASE — Google login + Firestore sync
+//  Hosted on: sage-cassata-1ed8d1.netlify.app
 // ═══════════════════════════════════════════════════════
-var _uid = 'local-user';
-var _workspaceId = 'local';
-var _isOwner = true;
-var _saveTimer = null;
-window._workspaceId = _workspaceId;
-window._isOwner = _isOwner;
-window._uid = _uid;
+firebase.initializeApp({
+  apiKey:"AIzaSyAokiywQpW30alxuLZPoA_EwC0Jw0Ycmz0",
+  authDomain:"finest-warehouse-3e38b.firebaseapp.com",
+  projectId:"finest-warehouse-3e38b",
+  storageBucket:"finest-warehouse-3e38b.firebasestorage.app",
+  messagingSenderId:"148245250996",
+  appId:"1:148245250996:web:80aa51a566b4fde59728e1"
+});
+var _auth = firebase.auth();
+var _db   = firebase.firestore();
+_db.enableIndexedDbPersistence().catch(function(){});
 
-var STORAGE_KEY = 'operix_data_v1';
+var _uid="", _workspaceId="", _isOwner=true, _unsub=null, _saveTimer=null;
 
+// ── Screen switching ──────────────────────────────────────────
 function showLogin(){
-  document.getElementById('S-login').style.display='flex';
-  document.getElementById('S-load').style.display='none';
-  document.getElementById('S-app').style.display='none';
+  document.getElementById("S-login").style.display="flex";
+  document.getElementById("S-load").style.display="none";
+  document.getElementById("S-app").style.display="none";
 }
 function showLoad(msg){
-  document.getElementById('S-login').style.display='none';
-  document.getElementById('S-load').style.display='flex';
-  document.getElementById('S-app').style.display='none';
-  var el=document.getElementById('load-msg');
-  if(el)el.textContent=msg||'Loading Operix…';
+  document.getElementById("S-login").style.display="none";
+  document.getElementById("S-load").style.display="flex";
+  document.getElementById("S-app").style.display="none";
+  var el=document.getElementById("load-msg");
+  if(el)el.textContent=msg||"Loading Operix…";
 }
 function showApp(){
-  document.getElementById('S-login').style.display='none';
-  document.getElementById('S-load').style.display='none';
-  document.getElementById('S-app').style.display='block';
+  document.getElementById("S-login").style.display="none";
+  document.getElementById("S-load").style.display="none";
+  document.getElementById("S-app").style.display="block";
+}
+function showLoginError(msg){
+  showLogin();
+  var old=document.getElementById("login-err"); if(old)old.remove();
+  var d=document.createElement("div");
+  d.id="login-err";
+  d.style.cssText="margin-top:14px;padding:11px 14px;background:rgba(239,68,68,.15);border:1px solid #ef4444;border-radius:8px;color:#fca5a5;font-size:12px;line-height:1.5;text-align:left;word-break:break-word;";
+  d.textContent=msg;
+  var c=document.querySelector(".lcard"); if(c)c.appendChild(d);
 }
 
-// ── Data persistence via localStorage ───────────────────
-function schedSave(){
-  var keys=['inv','pkt','proc','ord','lot','vendors','customers','dispatchers',
-            'movements','boxConfigs','boxes','pattri','history','allowedUsers','backups'];
-  clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(function(){
-    try{
-      var d={seq:S.seq, lastSaved:new Date().toISOString()};
-      keys.forEach(function(k){d[k]=JSON.stringify(S[k]);});
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
-      ['sync-dot','sync-dot2'].forEach(function(id){var e=document.getElementById(id);if(e)e.className='sdot ok';});
-      ['sync-lbl','sync-lbl2'].forEach(function(id){var e=document.getElementById(id);if(e)e.textContent='Saved';});
-    }catch(e){
-      ['sync-dot','sync-dot2'].forEach(function(id){var el=document.getElementById(id);if(el)el.className='sdot er';});
-    }
-  }, 800);
-  ['sync-dot','sync-dot2'].forEach(function(id){var e=document.getElementById(id);if(e)e.className='sdot sv';});
-  ['sync-lbl','sync-lbl2'].forEach(function(id){var e=document.getElementById(id);if(e)e.textContent='Saving…';});
-}
-
-function _loadLocalData(){
-  try{
-    var raw = localStorage.getItem(STORAGE_KEY);
-    if(!raw) return;
-    var d = JSON.parse(raw);
-    var keys=['inv','pkt','proc','ord','lot','vendors','customers','dispatchers',
-              'movements','boxConfigs','boxes','pattri','history','allowedUsers','backups'];
-    keys.forEach(function(k){try{if(d[k]!=null)S[k]=JSON.parse(d[k]);}catch(e){}});
-    if(d.seq) S.seq=d.seq;
-    if(!S.dispatchers) S.dispatchers=[];
-  }catch(e){}
-}
-
-// ── Auth stub (no Google needed) ────────────────────────
+// ── Login / Logout ────────────────────────────────────────────
 function doLogin(){
-  showLoad('Loading your workspace…');
-  setTimeout(function(){
-    _loadLocalData();
-    var nm = document.getElementById('u-name');
-    if(nm) nm.textContent = 'Local User';
-    var av = document.getElementById('u-avatar');
-    if(av) av.src = '';
-    showApp();
-    render();
-  }, 400);
+  showLoad("Signing in with Google…");
+  var p=new firebase.auth.GoogleAuthProvider();
+  p.addScope("email"); p.addScope("profile");
+  _auth.signInWithPopup(p).catch(function(err){
+    if(err.code==="auth/popup-blocked"||err.code==="auth/popup-closed-by-user"||err.code==="auth/cancelled-popup-request"){
+      _auth.signInWithRedirect(p).catch(function(e2){
+        showLoginError("Popup blocked. "+e2.message);
+      });
+    } else if(err.code==="auth/unauthorized-domain"){
+      showLoginError("Domain not authorised. Add “"+location.hostname+"” to Firebase Console → Authentication → Authorized Domains.");
+    } else {
+      showLoginError(err.message||err.code||"Sign-in failed. Please try again.");
+    }
+  });
 }
 function doLogout(){
-  if(!confirm('Clear session and return to start screen?')) return;
-  showLogin();
+  if(!confirm("Sign out of Operix?"))return;
+  _auth.signOut();
 }
 
-// ── Workspace stubs (single-user local mode) ─────────────
-function joinWorkspace(){ toast('Cloud sync not available in local mode','info'); }
-function leaveWorkspace(){ toast('Running in local mode','info'); }
-function transferAdmin(){ toast('Cloud sync not available','info'); }
+// ── Data sync ────────────────────────────────────────────────
+function schedSave(){
+  var keys=["inv","pkt","proc","ord","lot","vendors","customers","dispatchers",
+            "movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"];
+  ["sync-dot","sync-dot2"].forEach(function(id){var e=document.getElementById(id);if(e)e.className="sdot sv";});
+  ["sync-lbl","sync-lbl2"].forEach(function(id){var e=document.getElementById(id);if(e)e.textContent="Saving…";});
+  clearTimeout(_saveTimer);
+  _saveTimer=setTimeout(function(){
+    if(!_workspaceId)return;
+    var d={seq:S.seq,lastSaved:new Date().toISOString()};
+    keys.forEach(function(k){try{d[k]=JSON.stringify(S[k]);}catch(e){}});
+    _db.collection("workspaces").doc(_workspaceId).set(d,{merge:true})
+      .then(function(){
+        ["sync-dot","sync-dot2"].forEach(function(id){var e=document.getElementById(id);if(e)e.className="sdot ok";});
+        ["sync-lbl","sync-lbl2"].forEach(function(id){var e=document.getElementById(id);if(e)e.textContent="Synced";});
+      })
+      .catch(function(){
+        ["sync-dot","sync-dot2"].forEach(function(id){var e=document.getElementById(id);if(e)e.className="sdot er";});
+        ["sync-lbl","sync-lbl2"].forEach(function(id){var e=document.getElementById(id);if(e)e.textContent="Error";});
+      });
+  },1200);
+}
+function _loadData(d){
+  var keys=["inv","pkt","proc","ord","lot","vendors","customers","dispatchers",
+            "movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"];
+  keys.forEach(function(k){try{if(d[k]!=null)S[k]=JSON.parse(d[k]);}catch(e){}});
+  if(d.seq)S.seq=d.seq;
+  if(!S.dispatchers)S.dispatchers=[];
+}
+function _subscribe(wsId){
+  if(_unsub)_unsub();
+  var t=setTimeout(function(){showApp();render();},8000);
+  _unsub=_db.collection("workspaces").doc(wsId).onSnapshot(function(doc){
+    clearTimeout(t);
+    if(doc.exists)_loadData(doc.data());
+    showApp();render();
+  },function(){clearTimeout(t);showApp();render();});
+}
+function joinWorkspace(wsId){
+  wsId=(wsId||"").trim();if(!wsId)return;
+  _db.collection("workspaces").doc(wsId).get().then(function(doc){
+    if(doc.exists){
+      _workspaceId=wsId;_isOwner=false;
+      window._workspaceId=wsId;window._isOwner=false;
+      try{localStorage.setItem("operix_ws_"+_uid,wsId);}catch(e){}
+      _loadData(doc.data());_subscribe(wsId);
+      closeM();render();toast("Joined workspace "+wsId,"ok");
+    }else{toast("Workspace not found","warn");}
+  }).catch(function(){toast("Error joining workspace","warn");});
+}
+function leaveWorkspace(){
+  if(!confirm("Leave and return to your own workspace?"))return;
+  _isOwner=true;_workspaceId=_uid;
+  window._workspaceId=_uid;window._isOwner=true;
+  try{localStorage.removeItem("operix_ws_"+_uid);}catch(e){}
+  _subscribe(_uid);toast("Returned to your workspace","info");
+}
+function transferAdmin(){
+  var sel=document.getElementById("ws-transfer-email");
+  if(!sel||!sel.value){toast("Select a member","warn");return;}
+  _db.collection("workspaces").doc(_workspaceId).set({pendingTransfer:sel.value},{merge:true})
+    .then(function(){toast("Transfer requested","ok");})
+    .catch(function(){toast("Error","warn");});
+}
 
-// ── Auto-login if data exists ─────────────────────────────
-(function(){
-  var raw = localStorage.getItem(STORAGE_KEY);
-  if(raw){
-    // Already have data - auto-login
-    doLogin();
-  } else {
-    showLogin();
-  }
-})();
+// ── Auth state ────────────────────────────────────────────────
+_auth.getRedirectResult().catch(function(){});
+_auth.onAuthStateChanged(function(user){
+  if(!user){showLogin();return;}
+  _uid=user.uid;window._uid=user.uid;
+  var av=document.getElementById("u-avatar"),nm=document.getElementById("u-name");
+  if(av)av.src=user.photoURL||"";
+  if(nm)nm.textContent=user.displayName||user.email||"";
+  showLoad("Loading your data…");
+  var savedWS="";
+  try{savedWS=localStorage.getItem("operix_ws_"+_uid)||"";}catch(e){}
+  var wsId=savedWS||_uid;
+  _workspaceId=wsId;_isOwner=(wsId===_uid);
+  window._workspaceId=wsId;window._isOwner=_isOwner;
+  _subscribe(wsId);
+});
 
 </script>
 <script>
+
 
 
 // ══════════════════════════════════════════════
@@ -5874,6 +5930,7 @@ function goToLot(productName){
   if(sb)sb.classList.remove("open");
 }
 window.render=render;window.S=S;window.CFG=CFG;window.resetToDefaults=resetToDefaults;window.toast=toast;
+
 
 
 </script>
