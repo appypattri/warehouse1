@@ -255,7 +255,25 @@ function showApp(){document.getElementById("S-login").style.display="none";docum
 function doLogin(){
   showLoad("Signing in with Google…");
   var provider=new firebase.auth.GoogleAuthProvider();
-  _auth.signInWithPopup(provider).catch(function(){showLogin();});
+  provider.addScope("email");
+  provider.addScope("profile");
+  // Try popup; if blocked/failed, fall back to redirect
+  _auth.signInWithPopup(provider).catch(function(err){
+    if(err.code==="auth/popup-blocked"||err.code==="auth/popup-closed-by-user"||err.code==="auth/cancelled-popup-request"){
+      // Fallback to redirect
+      _auth.signInWithRedirect(provider).catch(function(){showLogin();});
+    } else {
+      showLogin();
+      var el=document.getElementById("load-msg");
+      if(el)el.textContent="Sign-in failed. Please try again.";
+    }
+  });
+  // Show "Taking longer…" after 8s
+  var _loginTimer=setTimeout(function(){
+    var el=document.getElementById("load-msg");
+    if(el&&el.textContent.includes("Signing in"))el.textContent="Taking longer than expected… please wait or refresh.";
+  },8000);
+  window._loginTimer=_loginTimer;
 }
 function doLogout(){
   if(!confirm("Sign out of Operix?"))return;
@@ -302,10 +320,16 @@ function _loadData(d){
 }
 function _subscribe(wsId){
   if(_unsub)_unsub();
+  // Timeout: if Firestore takes >6s, show app anyway with defaults
+  var _loadTimer=setTimeout(function(){
+    showApp();render();
+    var lbl=document.getElementById("sync-lbl");if(lbl)lbl.textContent="Offline";
+  },6000);
   _unsub=_db.collection("workspaces").doc(wsId).onSnapshot(function(doc){
+    clearTimeout(_loadTimer);
     if(doc.exists){_loadData(doc.data());}
     showApp();render();
-  },function(){showApp();render();});
+  },function(){clearTimeout(_loadTimer);showApp();render();});
 }
 
 function joinWorkspace(wsId){
@@ -342,9 +366,13 @@ function transferAdmin(){
     .catch(function(){toast("Error","warn");});
 }
 
+// Handle redirect sign-in result (popup fallback)
+_auth.getRedirectResult().catch(function(){});
+
 _auth.onAuthStateChanged(function(user){
   if(!user){showLogin();return;}
   _uid=user.uid;window._uid=user.uid;
+  if(window._loginTimer)clearTimeout(window._loginTimer);
   var av=document.getElementById("u-avatar"),nm=document.getElementById("u-name");
   if(av)av.src=user.photoURL||"";
   if(nm)nm.textContent=user.displayName||user.email||"";
