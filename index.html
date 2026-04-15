@@ -29,6 +29,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);font-
 #S-login{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:radial-gradient(ellipse at 50% 0%,#1a1205 0%,var(--bg) 60%);}
 .lcard{background:rgba(15,23,42,.85);border:1px solid rgba(148,163,184,.15);border-radius:20px;padding:48px 44px 40px;text-align:center;max-width:420px;width:100%;box-shadow:0 0 0 1px rgba(255,255,255,.04),0 40px 100px rgba(0,0,0,.8),0 0 80px rgba(14,165,233,.06);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);position:relative;z-index:1;}
 .llogo{font-family:'Syne',sans-serif;font-size:36px;font-weight:800;color:var(--ac);letter-spacing:-1px;}
+.llogo-row{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:8px;}
+.llogo-img{width:56px;height:56px;object-fit:contain;filter:drop-shadow(0 4px 12px rgba(14,165,233,.4));}
+.llogo-name{font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--tx);letter-spacing:2px;}
 .lsub{font-size:10px;color:var(--hx);letter-spacing:3px;text-transform:uppercase;margin-bottom:32px;}
 .ltitle{font-size:20px;font-weight:600;margin-bottom:8px;}
 .ldesc{font-size:13px;color:var(--mx);margin-bottom:36px;line-height:1.7;}
@@ -271,7 +274,7 @@ input.fi[readonly]{color:var(--hx);cursor:default;}
 
 /* Responsive */
 @media(max-width:680px){
-  .sidebar{width:220px;background:var(--S);border-right:1px solid var(--bd);display:flex;flex-direction:column;flex-shrink:0;position:fixed;top:0;bottom:0;left:0;overflow-y:auto;z-index:200;transition:transform .25s;}
+  .sidebar{transform:translateX(-100%);}
   .sidebar.open{transform:translateX(0);}
   .sb-overlay.show{display:block;}
   .hamburger{display:flex;}
@@ -283,7 +286,7 @@ input.fi[readonly]{color:var(--hx);cursor:default;}
   .tb-right .btn span.hide-sm{display:none;}
 }
 @media(min-width:681px) and (max-width:960px){
-  .sidebar{width:220px;background:var(--S);border-right:1px solid var(--bd);display:flex;flex-direction:column;flex-shrink:0;position:fixed;top:0;bottom:0;left:0;overflow-y:auto;z-index:200;transition:transform .25s;}
+  .sidebar{width:175px;}
   .main{margin-left:175px;}
   .two-col{grid-template-columns:1fr;}
 }
@@ -363,17 +366,25 @@ input.fi[readonly]{color:var(--hx);cursor:default;}
   <div class="sb-overlay" id="sb-overlay" onclick="closeSidebar()"></div>
   <div class="main">
     <div class="topbar" id="topbar">
-      <div style="display:flex;align-items:center;gap:10px;min-width:0">
+      <div style="display:flex;align-items:center;gap:10px;">
         <button class="hamburger" onclick="openSidebar()">☰</button>
-        <div style="min-width:0">
+        <div>
           <div class="pg-title" id="pg-title">Dashboard</div>
-          <div class="pg-sub" id="pg-sub">Live warehouse overview</div>
+          <div class="pg-sub" id="pg-sub">Warehouse overview</div>
         </div>
       </div>
       <div class="tb-right">
-        <button class="btn xs" id="undo-btn" onclick="_doUndo()" disabled>↩ Undo</button>
-        <button class="btn xs" id="redo-btn" onclick="_doRedo()" disabled>↪ Redo</button>
-        <span class="sdot ok" id="sync-dot2" style="margin:0 2px"></span>
+        <button class="btn sm pu" data-tab="ai">🤖 <span class="hide-sm">AI Predict</span></button>
+        <button class="btn sm te" data-tab="reports">📊 <span class="hide-sm">Reports</span></button>
+        <button class="btn sm" data-action="open-pdf-import">📄 <span class="hide-sm">Import PDF</span></button>
+        <button class="btn sm" data-action="do-undo" id="undo-btn" title="Undo last change">↩ <span class="hide-sm">Undo</span></button>
+        <button class="btn sm" data-action="do-redo" id="redo-btn" title="Redo" style="opacity:0.45">↪ <span class="hide-sm">Redo</span></button>
+        <button class="btn sm gr" data-action="full-backup">💾 <span class="hide-sm">Backup</span></button>
+        <button class="btn sm" onclick="exportAll()">⬇ <span class="hide-sm">Export</span></button>
+        <button class="btn sm" onclick="window.print()">🖨</button>
+        <button class="btn sm pr" data-action="open-order">+ <span class="hide-sm">New Order</span></button>
+        <button class="btn sm pu" data-action="open-bulk-order">⚡ <span class="hide-sm">Bulk Order</span></button>
+        <span class="sdot ok" id="sync-dot2" style="margin:0 4px"></span>
         <span class="sync-lbl" id="sync-lbl2" style="font-size:11px"></span>
       </div>
     </div>
@@ -383,8 +394,9 @@ input.fi[readonly]{color:var(--hx);cursor:default;}
 </div>
 
 <div id="toast-area" style="position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none"></div>
-<div class="ov" id="ov" onclick="ovClick(event)"></div>
-<div id="modal-wrap"></div>
+<div class="ov" id="ov" onclick="ovClick(event)">
+  <div id="modal-wrap"></div>
+</div>
 
 <!-- Main app JS at end of body — DOM ready, firebase already init'd in head -->
 
