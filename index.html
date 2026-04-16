@@ -2835,57 +2835,120 @@ function openOrderDetailModal(idx){
 // Invoice Modal
 function openInvoiceModal(idx){
   var o=S.ord[idx];if(!o)return;
-  var itemList=o.items&&o.items.length?o.items:[{product:o.product,lot:o.lot,qty:o.qty,unit:o.unit,price:o.price,value:o.value,orderType:o.orderType,pktType:o.pktType,invQty:null,pktQty:null}];
-  var itemRows=itemList.map(function(it,n){
-    var hasInv=it.invQty>0||(it.orderType!=="packet"&&it.qty>0);
-    var hasPkt=it.pktQty>0||(it.orderType==="packet"&&it.qty>0);
-    var rows="";
+  // Normalise items — handle legacy single-item orders too
+  var itemList=o.items&&o.items.length?o.items:[{
+    product:o.product,lot:o.lot,pktType:o.pktType,
+    invQty:o.orderType!=='packet'?o.qty:0,
+    invUnit:o.unit,ordUnit:o.unit,invQtyKg:o.qty,
+    pktQty:o.orderType==='packet'?o.qty:0,
+    pktUnit:o.unit,
+    qty:o.qty,unit:o.unit,
+    price:o.price,value:o.value,orderType:o.orderType
+  }];
+
+  var rowNum=0;
+  var itemRows=itemList.map(function(it){
+    var rows='';
+
+    // ── Product row ──────────────────────────────────────────
+    var hasInv=(it.invQty>0)||(it.orderType!=='packet'&&it.qty>0&&!it.invSrcKey==='');
+    // More robust check
+    hasInv = it.invQty>0 || (it.orderType==='product'&&it.qty>0) || (it.orderType==='product+packet'&&(it.invQty||0)>0);
+
     if(hasInv){
-      var q=it.invQty!=null?it.invQty:it.qty;
-      var u=it.invUnit||it.unit;
-      rows+='<tr><td>'+(n+1)+'</td><td>'+it.product+'</td><td style="font-family:monospace">'+(it.lot||"—")+'</td><td>Product</td><td>'+N(q)+' '+u+'</td><td>'+(it.price?CFG.currency+N(it.price):"—")+'</td><td>'+(it.value&&!it.pktQty?CFG.currency+N(it.value):it.price&&q?CFG.currency+N(q*it.price):"—")+'</td></tr>';
+      rowNum++;
+      // Display qty in the unit the user actually entered (ordUnit), not the stored unit
+      var dispQty = it.invQty!=null ? it.invQty : it.qty;
+      var dispUnit = it.ordUnit || it.invUnit || it.unit || 'kg';
+      // Value calculation
+      var rowVal = it.value && !it.pktQty ? it.value
+        : (it.price && dispQty ? (dispUnit==='gram'?(dispQty/1000)*it.price : dispQty*it.price) : 0);
+      rows+='<tr>'
+        +'<td>'+rowNum+'</td>'
+        +'<td>'+escH(it.product||'—')+'</td>'
+        +'<td style="font-family:monospace">'+(it.lot||'—')+'</td>'
+        +'<td>Product</td>'
+        +'<td>'+N(dispQty)+' '+dispUnit+'</td>'
+        +'<td>'+(it.price?CFG.currency+N(it.price):'—')+'</td>'
+        +'<td>'+(rowVal>0?CFG.currency+N(rowVal):'—')+'</td>'
+        +'</tr>';
     }
+
+    // ── Packet row ───────────────────────────────────────────
+    var hasPkt=(it.pktQty>0)||(it.orderType==='packet'&&it.qty>0);
     if(hasPkt){
-      var q=it.pktQty!=null?it.pktQty:it.qty;
-      var u=it.pktUnit||it.unit;
-      rows+='<tr><td>'+(hasInv?"":n+1)+'</td><td>'+it.product+' (Packet)</td><td style="font-family:monospace">'+(it.pktType||"—")+'</td><td>Packet</td><td>'+N(q)+' '+u+'</td><td>'+(it.price?CFG.currency+N(it.price):"—")+'</td><td>'+(it.price?CFG.currency+N(q*it.price):"—")+'</td></tr>';
+      // Packet row shares rowNum with product row (indented, no new number)
+      var pqty=it.pktQty>0?it.pktQty:it.qty;
+      var punit=it.pktUnit||it.unit||'pcs';
+      var ptype=it.pktType||'—';
+      var pprice=it.pktPrice||0;
+      // For packet-only items, use main price
+      if(!pprice&&it.orderType==='packet') pprice=it.price||0;
+      var pval=pprice&&pqty?pqty*pprice:0;
+      rows+='<tr style="background:rgba(255,255,255,.02)">'
+        +'<td style="color:var(--hx);font-size:11px">'+(hasInv?'':rowNum)+'</td>'
+        +'<td style="padding-left:14px;color:var(--mx)">'+escH((it.product||''))+' <span style="font-size:10.5px;opacity:.7">(Packet)</span></td>'
+        +'<td style="font-family:monospace">'+escH(ptype)+'</td>'
+        +'<td>Packet</td>'
+        +'<td>'+N(pqty)+' '+punit+'</td>'
+        +'<td>'+(pprice?CFG.currency+N(pprice):'—')+'</td>'
+        +'<td>'+(pval>0?CFG.currency+N(pval):'—')+'</td>'
+        +'</tr>';
+      if(!hasInv) rowNum++;
     }
+
     return rows;
-  }).join("");
-  var totalAmt=o.value||itemList.reduce(function(a,it){return a+(it.value||0);},0);
+  }).join('');
+
+  // Total = sum of all product values (packet values excluded per req 1)
+  var totalAmt=o.value>0?o.value:itemList.reduce(function(a,it){
+    if(it.orderType==='packet') return a+(it.value||0);
+    var dq=it.invQty!=null?it.invQty:it.qty;
+    var du=it.ordUnit||it.unit||'kg';
+    var v=it.value&&!it.pktQty?it.value:(it.price&&dq?(du==='gram'?(dq/1000)*it.price:dq*it.price):0);
+    return a+v;
+  },0);
+
   var cust=S.customers.find(function(c){return c.name===o.customer;})||{};
+
   openM('<div class="modal wd">'
     +'<div class="mhdr"><div class="mtitle">Invoice — '+o.id+'</div><button class="mclose" data-action="close-m">✕</button></div>'
     +'<div class="mbody"><div class="inv-paper">'
     // Header
     +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:2px solid #333">'
-    +'<div><div class="inv-logo">FINEST</div><div style="font-size:11px;color:#888;margin-top:2px">Warehouse Management System</div></div>'
+    +'<div><div class="inv-logo">OPERIX</div><div style="font-size:11px;color:#888;margin-top:2px">Warehouse Management System</div></div>'
     +'<div style="text-align:right;font-size:12px;color:#555">'
     +'<div><strong>Invoice #'+o.id+'</strong></div>'
     +'<div>Date: '+fd(o.date)+'</div>'
     +'<div>Status: '+o.status.toUpperCase()+'</div>'
-    +(o.dispatchDate?'<div>Dispatch: '+fd(o.dispatchDate)+'</div>':"")
+    +(o.dispatchDate?'<div>Dispatch: '+fd(o.dispatchDate)+'</div>':'')
     +'</div></div>'
     // Bill To
     +'<div style="margin-bottom:14px;font-size:13px">'
-    +'<strong>Bill To:</strong> '+o.customer
-    +(cust.address?'<br><span style="font-size:11.5px;color:#666">'+cust.address+'</span>':"")
-    +(cust.gstin?'<br><span style="font-size:11.5px;color:#666">GSTIN: '+cust.gstin+'</span>':"")
-    +(cust.phone?'<br><span style="font-size:11.5px;color:#666">📞 '+cust.phone+'</span>':"")
+    +'<strong>Bill To:</strong> '+escH(o.customer)
+    +(cust.address?'<br><span style="font-size:11.5px;color:#666">'+escH(cust.address)+'</span>':'')
+    +(cust.gstin?'<br><span style="font-size:11.5px;color:#666">GSTIN: '+escH(cust.gstin)+'</span>':'')
+    +(cust.phone?'<br><span style="font-size:11.5px;color:#666">📞 '+escH(cust.phone)+'</span>':'')
     +'</div>'
-    // Items table — ALL items
-    +'<table class="inv-tbl"><thead><tr><th>#</th><th>Product</th><th>Lot / Pack Type</th><th>Type</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>'
+    // Items table — ALL items with correct qty
+    +'<table class="inv-tbl"><thead><tr>'
+    +'<th>#</th><th>Product</th><th>Lot / Pack Type</th><th>Type</th><th>Qty</th><th>Rate</th><th>Amount</th>'
+    +'</tr></thead>'
     +'<tbody>'+itemRows+'</tbody></table>'
     // Total
-    +(totalAmt?'<div style="text-align:right;margin-top:10px;padding-top:8px;border-top:2px solid #333;font-size:14px"><strong>Total: '+CFG.currency+N(totalAmt)+'</strong></div>':"")
+    +(totalAmt>0?'<div style="text-align:right;margin-top:10px;padding-top:8px;border-top:2px solid #333;font-size:14px"><strong>Total: '+CFG.currency+N(totalAmt)+'</strong></div>':'')
+    // Box info
+    +(o.boxType&&o.boxQty?'<div style="font-size:11.5px;color:#666;margin-top:6px;text-align:right">Box: '+escH(o.boxType)+' × '+o.boxQty+'</div>':'')
     // Footer
     +'<div style="font-size:11px;color:#888;border-top:1px solid #ddd;padding-top:10px;margin-top:10px">'
-    +(o.fromLoc||o.toLoc?'Dispatch: '+(o.fromLoc||"—")+' → '+(o.toLoc||"—")+'<br>':"")
-    +(o.notes?"Notes: "+o.notes+"<br>":"")
-    +'Generated: '+fd(today())+' · Finest Warehouse Management'
+    +(o.fromLoc||o.toLoc?'Dispatch: '+escH(o.fromLoc||'—')+' → '+escH(o.toLoc||'—')+'<br>':'')
+    +(o.notes?'Notes: '+escH(o.notes)+'<br>':'')
+    +'Generated: '+fd(today())+' · Operix Warehouse Management'
     +'</div>'
     +'</div></div>'
-    +'<div class="mfoot"><button class="btn" data-action="close-m">Close</button><button class="btn pr" onclick="window.print()">🖨 Print Invoice</button></div>'
+    +'<div class="mfoot"><button class="btn" data-action="close-m">Close</button>'
+    +'<button class="btn pr" onclick="window.print()">🖨 Print Invoice</button>'
+    +'</div>'
     +'</div>');
 }
 
