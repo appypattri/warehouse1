@@ -3572,36 +3572,37 @@ function cancelOrder(i){
   _pushUndo("Cancel order "+o.id,["ord","inv","pkt","boxes","pattri"]);
 
   var itemList=o.items||[];
-  // Legacy single-item orders
   if(!itemList.length){
-    if(o.orderType==="packet")  itemList=[{pktSrcKey:"",pktQty:o.qty,pktUnit:o.unit,product:o.product,pktType:o.pktType}];
-    else                        itemList=[{invSrcKey:"",invQty:o.qty,invUnit:o.unit,product:o.product,lot:o.lot,unit:o.unit}];
+    if(o.orderType==="packet") itemList=[{pktSrcKey:"",pktQty:o.qty,pktUnit:o.unit,product:o.product,pktType:o.pktType,ordUnit:o.unit}];
+    else                       itemList=[{invSrcKey:"",invQty:o.qty,invUnit:o.unit,ordUnit:o.unit,product:o.product,lot:o.lot,unit:o.unit}];
   }
 
   itemList.forEach(function(it){
-    // ── Restore inventory product stock
-    var invQty = it.invQty || (!it.pktSrcKey ? it.qty : 0) || 0;
-    if(invQty>0){
-      var invRef = it.invSrcKey
-        ? S.inv[+it.invSrcKey.split(':')[1]]
-        : (S.inv.find(function(r){return r.name===it.product&&r.lot===it.lot;})||S.inv.find(function(r){return r.name===it.product;}));
+    // ── Restore inventory stock
+    var invQtyRaw=it.invQty||(it.orderType!=="packet"?it.qty:0)||0;
+    if(invQtyRaw>0){
+      // Convert back to kg if order was in grams
+      var restoreKg=it.ordUnit==="gram"?invQtyRaw/1000:invQtyRaw;
+      var invRef=it.invSrcKey
+        ?S.inv[+it.invSrcKey.split(':')[1]]
+        :(S.inv.find(function(r){return r.name===it.product&&r.lot===it.lot;})||S.inv.find(function(r){return r.name===it.product;}));
       if(invRef){
-        invRef.qty=Math.round((invRef.qty+invQty)*1000)/1000;
-        logMove("in",invRef.name,invQty,it.invUnit||it.unit||invRef.unit,o.id,"Order Cancelled — stock restored");
+        invRef.qty=Math.round((invRef.qty+restoreKg)*1000)/1000;
+        logMove("in",invRef.name,invQtyRaw,it.ordUnit||it.invUnit||it.unit||invRef.unit,o.id,"Order Cancelled — stock restored");
       }
-      // Restore pattri
-      var invUnit=it.invUnit||it.unit||"";
-      if(invUnit==="kg"||invUnit==="litre"){
+      // ── INTERLINK: restore pattri
+      var invUnit=it.ordUnit||it.invUnit||it.unit||"";
+      if(invUnit==="kg"||invUnit==="gram"){
         var pt=S.pattri.find(function(p){return p.name===it.product;});
-        if(pt)pt.netWeight=Math.max(0,Math.round(((pt.netWeight||0)+invQty)*1000)/1000);
+        if(pt)pt.netWeight=Math.max(0,Math.round(((pt.netWeight||0)+restoreKg)*1000)/1000);
       }
     }
     // ── Restore packet stock
-    var pktQty = it.pktQty || (it.orderType==="packet"?it.qty:0) || 0;
+    var pktQty=it.pktQty||(it.orderType==="packet"?it.qty:0)||0;
     if(pktQty>0){
-      var pktRef = it.pktSrcKey
-        ? S.pkt[+it.pktSrcKey.split(':')[1]]
-        : S.pkt.find(function(r){return r.name===it.product&&r.type===it.pktType;});
+      var pktRef=it.pktSrcKey
+        ?S.pkt[+it.pktSrcKey.split(':')[1]]
+        :S.pkt.find(function(r){return r.name===it.product&&r.type===it.pktType;});
       if(pktRef){
         pktRef.qty=Math.round((pktRef.qty+pktQty)*1000)/1000;
         logMove("in",pktRef.name+" (pkt)",pktQty,it.pktUnit||pktRef.unit,o.id,"Order Cancelled — packet stock restored");
@@ -3609,7 +3610,7 @@ function cancelOrder(i){
     }
   });
 
-  // Restore box stock
+  // ── INTERLINK: restore box stock
   if(o.boxType&&o.boxQty>0){
     var bref=S.boxes.find(function(b){return b.name===o.boxType;});
     if(bref){bref.qty+=o.boxQty;logMove("in","Box: "+o.boxType,o.boxQty,"box",o.id,"Order Cancelled — boxes restored");}
@@ -4780,13 +4781,16 @@ function buildBulkOrderRow(i){
     return'<option value="pkt:'+j+'">'+escH(r.name)+' ('+r.type+')</option>';
   }).join('');
   return'<tr id="bo-row-'+i+'">'
-    +'<td style="padding:4px 6px;color:var(--hx);font-size:11px;text-align:center">'+(i+1)+'</td>'
-    // Product dropdown (req 2)
+    +'<td style="padding:4px 6px;color:var(--hx);font-size:11px;text-align:center;vertical-align:top;padding-top:10px">'+(i+1)+'</td>'
+    // ── Product + Lot + Qty + Unit column
     +'<td style="padding:4px 6px">'
     +'<select class="fi" id="bo-inv-'+i+'" onchange="onBulkInvChange('+i+')" style="font-size:12px;margin-bottom:3px">'+invOpts+'</select>'
+    // Lot dropdown — populated by onBulkInvChange
+    +'<select class="fi" id="bo-lot-'+i+'" style="font-size:11px;font-family:monospace;margin-bottom:3px;color:var(--b2)" title="Select Lot">'
+    +'<option value="">— Lot —</option>'
+    +'</select>'
     +'<div style="display:flex;gap:4px;align-items:center">'
     +'<input class="fi" id="bo-inv-qty-'+i+'" type="number" min="0" step="0.001" placeholder="Qty" style="font-size:12px;font-weight:600;flex:1" oninput="updateBulkOrderTotal()">'
-    // Unit selector kg/gram/pcs (req 3)
     +'<select class="fi" id="bo-unit-'+i+'" style="font-size:11px;width:65px" onchange="updateBulkOrderTotal()">'
     +'<option value="kg">kg</option>'
     +'<option value="gram">gram</option>'
@@ -4797,7 +4801,7 @@ function buildBulkOrderRow(i){
     +'</div>'
     +'<div id="bo-inv-hint-'+i+'" style="font-size:10px;color:var(--at);margin-top:2px"></div>'
     +'</td>'
-    // Packet dropdown (req 2)
+    // ── Packet + Qty column
     +'<td style="padding:4px 6px">'
     +'<select class="fi" id="bo-pkt-'+i+'" style="font-size:12px;margin-bottom:3px" onchange="updateBulkOrderTotal()">'+pktOpts+'</select>'
     +'<input class="fi" id="bo-pkt-qty-'+i+'" type="number" min="0" step="1" placeholder="Pkt Qty" style="font-size:12px;font-weight:600" oninput="updateBulkOrderTotal()">'
@@ -4965,8 +4969,9 @@ function saveBulkOrder(){
     var invQtyRaw=parseFloat((document.getElementById("bo-inv-qty-"+i)||{value:0}).value)||0;
     var pktQty=parseFloat((document.getElementById("bo-pkt-qty-"+i)||{value:0}).value)||0;
     var price=parseFloat((document.getElementById("bo-price-"+i)||{value:0}).value)||0;
-    // req 3: unit selector per row
     var rowUnit=(document.getElementById("bo-unit-"+i)||{value:"kg"}).value;
+    // ── REQ 1: Read lot from lot dropdown ──
+    var selLot=(document.getElementById("bo-lot-"+i)||{value:""}).value;
     if(!invSrc&&!pktSrc)continue;
     if(invQtyRaw<=0&&pktQty<=0)continue;
 
@@ -4976,7 +4981,7 @@ function saveBulkOrder(){
 
     if(invSrc){
       invRef=S.inv[+invSrc.split(':')[1]];
-      if(invRef){pName=invRef.name;pLot=invRef.lot;invUnit=invRef.unit;}
+      if(invRef){pName=invRef.name;pLot=selLot||invRef.lot;invUnit=invRef.unit;}
     }
     if(pktSrc){
       pktRef=S.pkt[+pktSrc.split(':')[1]];
@@ -4987,11 +4992,10 @@ function saveBulkOrder(){
     if(pktSrc&&!pktRef){errors.push("Row "+(i+1)+": invalid packet");continue;}
     if(invRef&&invQtyKg>invRef.qty){
       var availDisp=rowUnit==="gram"?N(invRef.qty*1000)+" gram":N(invRef.qty)+" "+invUnit;
-      errors.push("Row "+(i+1)+": "+pName+" — only "+availDisp+" avail");continue;
+      errors.push("Row "+(i+1)+": "+escH(pName)+" — only "+availDisp+" avail");continue;
     }
-    if(pktRef&&pktQty>pktRef.qty){errors.push("Row "+(i+1)+": packet "+pktRef.name+" — only "+N(pktRef.qty)+" "+pktUnit+" avail");continue;}
+    if(pktRef&&pktQty>pktRef.qty){errors.push("Row "+(i+1)+": packet "+escH(pktRef.name)+" — only "+N(pktRef.qty)+" "+pktUnit+" avail");continue;}
 
-    // Value = product qty × price only (req 1)
     var rowVal=invRef&&invQtyRaw>0?(rowUnit==="gram"?(invQtyRaw/1000)*price:invQtyRaw*price):0;
     totalVal+=rowVal;
 
@@ -5006,9 +5010,18 @@ function saveBulkOrder(){
       stockAfter:invRef?Math.round((invRef.qty-invQtyKg)*1000)/1000:0
     });
 
-    // Deduct stock (req 4: interlink)
+    // ── Deduct inventory stock
     if(invRef&&invQtyKg>0){
       invRef.qty=Math.max(0,Math.round((invRef.qty-invQtyKg)*1000)/1000);
+      // ── INTERLINK: update lot tracking
+      var lg=S.lot.find(function(l){return l.name===pName;});
+      if(lg&&pLot){
+        if(!lg.lotDates)lg.lotDates={};
+        if(!lg.lotDates[pLot])lg.lotDates[pLot]={};
+        // Update lot as used
+        if(lg.current!==pLot)lg.current=pLot;
+      }
+      // ── INTERLINK: update pattri (for kg products)
       if(invUnit==="kg"||rowUnit==="gram"||rowUnit==="kg"){
         var pt=S.pattri.find(function(p){return p.name===pName;});
         if(pt)pt.netWeight=Math.max(0,Math.round(((pt.netWeight||0)-invQtyKg)*1000)/1000);
@@ -5027,10 +5040,10 @@ function saveBulkOrder(){
     logMove("out","Box: "+bref.name,bQty,"box",ordId,"Bulk Order box usage");
   }
 
-  // Log movements (req 4)
+  // ── Log movements (interlink with Stock Log)
   items.forEach(function(it){
-    var unitLabel=it.ordUnit||it.invUnit||it.unit;
-    if(it.invQty>0)logMove("out",it.product,it.invQty,unitLabel,ordId,"Bulk Order — "+cust);
+    var ul=it.ordUnit||it.invUnit||it.unit;
+    if(it.invQty>0)logMove("out",it.product,it.invQty,ul,ordId,"Bulk Order — "+cust+(it.lot?" lot "+it.lot:""));
     if(it.pktQty>0)logMove("out",it.product+" (pkt)",it.pktQty,it.pktUnit,ordId,"Bulk Order packet — "+cust);
   });
 
@@ -6374,12 +6387,31 @@ function updOisTotal(){
 
 function onBulkInvChange(i){
   var invSel=document.getElementById('bo-inv-'+i);
+  var lotSel=document.getElementById('bo-lot-'+i);
   var unitSel=document.getElementById('bo-unit-'+i);
   var hint=document.getElementById('bo-inv-hint-'+i);
-  if(!invSel||!invSel.value){if(hint)hint.textContent='';return;}
+  if(!invSel||!invSel.value){
+    if(lotSel)lotSel.innerHTML='<option value="">— Lot —</option>';
+    if(hint)hint.textContent='';
+    return;
+  }
   var prod=S.inv[+invSel.value.split(':')[1]];
   if(!prod)return;
-  // Auto-set unit to match product's unit
+  // Populate lot dropdown from lot tracking
+  var lotOpts='<option value="">— Lot —</option>';
+  var lg=S.lot.find(function(l){return l.name===prod.name;});
+  if(lg){
+    lotOpts=lg.lots.slice().reverse().map(function(lt){
+      var tag=lt===lg.current?' ✓ current':'';
+      var ld=(lg.lotDates||{})[lt]||{};
+      var qtag=ld.receivedQty?' ('+N(ld.receivedQty)+' '+ld.receivedUnit+')':'';
+      return'<option value="'+lt+'" '+(lt===lg.current?'selected':'')+'>'+lt+tag+qtag+'</option>';
+    }).join('');
+  } else if(prod.lot){
+    lotOpts='<option value="'+prod.lot+'" selected>'+prod.lot+' ✓</option>';
+  }
+  if(lotSel)lotSel.innerHTML=lotOpts;
+  // Auto-set unit
   if(unitSel){
     for(var k=0;k<unitSel.options.length;k++){
       if(unitSel.options[k].value===prod.unit){unitSel.selectedIndex=k;break;}
