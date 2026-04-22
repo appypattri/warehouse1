@@ -607,7 +607,6 @@ function _subscribe(wsId){
 
 // ── Team workspace functions ──────────────────────────────
 function joinWorkspace(wsId){
-  // wsId can come from input or argument
   if(!wsId){
     var el=document.getElementById("ws-join-id");
     wsId=el?el.value.trim():"";
@@ -615,40 +614,83 @@ function joinWorkspace(wsId){
   wsId=(wsId||"").trim();
   if(!wsId){toast("Enter a Workspace ID","warn");return;}
   if(wsId===_uid){toast("That is your own Workspace ID","info");return;}
-  showLoad("Verifying access…");
+  showLoad("Connecting to workspace\u2026");
   _db.collection("workspaces").doc(wsId).get()
     .then(function(doc){
       if(!doc.exists){
         showApp();
-        toast("Workspace not found — check the ID and try again","warn");
+        toast("Workspace not found \u2014 check the ID and try again","warn");
         return;
       }
       var data=doc.data();
+      // allowedUsers stored as JSON string array of emails
       var allowed=[];
-      try{allowed=JSON.parse(data.allowedUsers||"[]");}catch(e){}
+      try{
+        var raw=data.allowedUsers;
+        if(Array.isArray(raw)) allowed=raw;
+        else if(typeof raw==="string") allowed=JSON.parse(raw||"[]");
+      }catch(e){allowed=[];}
       // Check access by email OR uid
-      var hasAccess=allowed.indexOf(window._userEmail)>=0||allowed.indexOf(_uid)>=0;
+      var email=(window._userEmail||"").toLowerCase();
+      var hasAccess=false;
+      for(var i=0;i<allowed.length;i++){
+        if((allowed[i]||"").toLowerCase()===email||allowed[i]===_uid){hasAccess=true;break;}
+      }
       if(!hasAccess){
         showApp();
-        toast("Access denied. Ask the owner to add: "+window._userEmail+" in Team Access → Team Members","warn");
+        toast("Access denied. Ask the owner to add your Gmail: "+email,"warn");
+        // Show alert with full instructions
+        setTimeout(function(){
+          var msg="Access Denied\n\n"
+            +"Your Gmail ("+email+") is not in the owner\u2019s team list.\n\n"
+            +"Ask the workspace owner to:\n"
+            +"1. Open the app \u2192 Team Access tab\n"
+            +"2. Add your Gmail: "+email+"\n"
+            +"3. Share the Workspace ID with you again";
+          alert(msg);
+        },300);
         return;
       }
-      // Grant access
+      // Access granted
       _workspaceId=wsId;_isOwner=false;
       window._workspaceId=wsId;window._isOwner=false;
       try{localStorage.setItem("operix_ws_"+_uid,wsId);}catch(e){}
-      // Subscribe to real-time updates from shared workspace
       _subscribe(wsId);
-      // Clear input
       var el=document.getElementById("ws-join-id");
       if(el)el.value="";
-      toast("✓ Joined workspace! Loading shared data…","ok");
+      toast("\u2713 Joined workspace! Loading shared data\u2026","ok");
     })
     .catch(function(err){
       showApp();
-      // If permission denied by Firestore rules, show helpful message
-      if(err.code==="permission-denied"){
-        toast("Permission denied by Firestore. See Team Access for rules setup.","warn");
+      if(err.code==="permission-denied"||err.message.indexOf("Missing or insufficient")>=0){
+        // Firestore rules are blocking the READ — show exact fix
+        var fixMsg="<b>\u26a0\ufe0f Firestore Rules need updating</b><br><br>"
+          +"The Firestore security rules are blocking access.<br>"
+          +"The owner must update rules in Firebase Console:<br><br>"
+          +"<b>Firebase Console \u2192 Firestore \u2192 Rules</b><br>"
+          +"Replace all rules with:<br><br>"
+          +"<code style='font-size:10px;line-height:1.6;display:block;background:var(--S2);padding:8px;border-radius:6px;white-space:pre-wrap'>"
+          +"rules_version = '2';\nservice cloud.firestore {\n"
+          +"  match /databases/{database}/documents {\n"
+          +"    match /workspaces/{userId} {\n"
+          +"      allow read: if request.auth != null;\n"
+          +"      allow write: if request.auth != null\n"
+          +"        && (request.auth.uid == userId\n"
+          +"          || (resource != null\n"
+          +"            && request.auth.token.email\n"
+          +"               in resource.data.allowedUsers));\n"
+          +"    }\n  }\n}"
+          +"</code>";
+        // Show in a modal-like div
+        var errDiv=document.createElement("div");
+        errDiv.style.cssText="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.8);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px";
+        errDiv.innerHTML='<div style="background:var(--S);border:1px solid var(--bd);border-radius:16px;padding:24px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto">'
+          +'<div style="font-size:14px;line-height:1.6;margin-bottom:16px">'+fixMsg+'</div>'
+          +'<div style="display:flex;gap:8px">'
+          +'<button class="btn pr" onclick="navigator.clipboard.writeText(\'rules_version = \\\'2\\\';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /workspaces/{userId} {\n      allow read: if request.auth != null;\n      allow write: if request.auth != null\n        && (request.auth.uid == userId\n          || (resource != null\n            && request.auth.token.email\n               in resource.data.allowedUsers));\n    }\n  }\n}\').then(function(){toast(\'Rules copied! Paste in Firebase Console \u2192 Firestore \u2192 Rules\',\'ok\');});this.parentNode.parentNode.parentNode.remove()">📋 Copy Rules</button>'
+          +'<button class="btn" onclick="this.parentNode.parentNode.parentNode.remove()">Close</button>'
+          +'</div></div>';
+        document.body.appendChild(errDiv);
       } else {
         toast("Error: "+err.message,"warn");
       }
