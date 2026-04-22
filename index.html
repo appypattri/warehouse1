@@ -418,7 +418,6 @@ if(location.protocol==="file:"){
     var login=document.getElementById("S-login");
     if(load)load.style.display="none";
     if(login)login.style.display="flex";
-    // Disable the button
     var btn=document.querySelector(".gbtn");
     if(btn){btn.disabled=true;btn.style.opacity="0.4";btn.title="Upload to a web server first";}
   });
@@ -432,8 +431,7 @@ if(location.protocol==="file:"){
     if(login)login.style.display="flex";
   });
 } else {
-// Firebase init — runs after SDK scripts above (HEAD order guaranteed)
-// Authorized domain: appypattri.github.io (add this in Firebase Console > Auth > Settings > Authorized Domains)
+// Firebase init
 firebase.initializeApp({
   apiKey:            "AIzaSyAokiywQpW30alxuLZPoA_EwC0Jw0Ycmz0",
   authDomain:        "finest-warehouse-3e38b.firebaseapp.com",
@@ -444,9 +442,9 @@ firebase.initializeApp({
 });
 var _auth=firebase.auth();
 var _db=firebase.firestore();
-// offline persistence handled automatically by Firestore v9
 
 var _uid="",_workspaceId="",_isOwner=true,_saveTimer=null,_unsub=null;
+window._userEmail=""; // track email for allowedUsers check
 
 function showLogin(){
   document.getElementById("S-login").style.display="flex";
@@ -469,6 +467,8 @@ function _setErr(msg){
   var e=document.getElementById("login-err");
   if(e){e.style.display=msg?"block":"none";e.innerHTML=msg||"";}
 }
+
+// ── Google Login ──────────────────────────────────────────
 function doLogin(){
   _setErr("");
   var provider=new firebase.auth.GoogleAuthProvider();
@@ -488,12 +488,8 @@ function doLogin(){
     } else if(err.code==="auth/unauthorized-domain"){
       _setErr(
         "<b>⚠️ Domain not authorised</b><br><br>"
-        +"Do this in <b>Firebase Console</b>:<br>"
-        +"1. Go to <a href='https://console.firebase.google.com/project/finest-warehouse-3e38b/authentication/settings' target='_blank' style='color:#60a5fa'>Authentication → Settings</a><br>"
-        +"2. Scroll to <b>Authorized Domains</b><br>"
-        +"3. Click <b>Add domain</b><br>"
-        +"4. Enter: <code style='background:rgba(255,255,255,.1);padding:2px 6px;border-radius:4px'>appypattri.github.io</code><br>"
-        +"5. Click <b>Add</b> then try again"
+        +"Go to <a href='https://console.firebase.google.com/project/finest-warehouse-3e38b/authentication/settings' target='_blank' style='color:#60a5fa'>Firebase Console → Authentication → Settings</a><br>"
+        +"Add domain: <code style='background:rgba(255,255,255,.1);padding:2px 6px;border-radius:4px'>appypattri.github.io</code>"
       );
     } else {
       _setErr(err.message||err.code||"Sign-in failed.");
@@ -504,16 +500,70 @@ function doLogout(){
   if(!confirm("Sign out of Operix?"))return;
   _auth.signOut();
 }
+
+// ── Auth state ────────────────────────────────────────────
 function _onUser(user){
-  _uid=user.uid;window._uid=user.uid;
+  _uid=user.uid;
+  window._uid=user.uid;
+  window._userEmail=user.email||"";
+  window._userName=user.displayName||user.email||"";
   var nm=document.getElementById("u-name");if(nm)nm.textContent=user.displayName||user.email||"";
   var av=document.getElementById("u-avatar");if(av)av.src=user.photoURL||"";
   showLoad("Loading your data…");
-  var ws="";try{ws=localStorage.getItem("operix_ws_"+_uid)||"";}catch(e){}
-  ws=ws||_uid;_workspaceId=ws;_isOwner=(ws===_uid);
-  window._workspaceId=_workspaceId;window._isOwner=_isOwner;
-  _subscribe(_workspaceId);
+  // Check for saved workspace (joined someone else's workspace)
+  var savedWs="";
+  try{savedWs=localStorage.getItem("operix_ws_"+_uid)||"";}catch(e){}
+  if(savedWs&&savedWs!==_uid){
+    // Verify still have access before loading
+    _verifyAndJoin(savedWs);
+  } else {
+    _workspaceId=_uid;_isOwner=true;
+    window._workspaceId=_uid;window._isOwner=true;
+    _subscribe(_uid);
+  }
 }
+
+// ── Verify access then join shared workspace ──────────────
+function _verifyAndJoin(wsId){
+  _db.collection("workspaces").doc(wsId).get()
+    .then(function(doc){
+      if(!doc.exists){
+        // Owner deleted workspace — fall back to own
+        try{localStorage.removeItem("operix_ws_"+_uid);}catch(e){}
+        _workspaceId=_uid;_isOwner=true;
+        window._workspaceId=_uid;window._isOwner=true;
+        _subscribe(_uid);
+        return;
+      }
+      var data=doc.data();
+      var allowed=[];
+      try{allowed=JSON.parse(data.allowedUsers||"[]");}catch(e){}
+      // Check if user is in allowedUsers (by email or uid)
+      var hasAccess=allowed.indexOf(window._userEmail)>=0||allowed.indexOf(_uid)>=0;
+      if(!hasAccess){
+        // No longer authorised — fall back to own workspace
+        try{localStorage.removeItem("operix_ws_"+_uid);}catch(e){}
+        _workspaceId=_uid;_isOwner=true;
+        window._workspaceId=_uid;window._isOwner=true;
+        _subscribe(_uid);
+        toast("Access removed from shared workspace. Loading your own data.","info");
+        return;
+      }
+      // Access confirmed — subscribe to shared workspace
+      _workspaceId=wsId;_isOwner=false;
+      window._workspaceId=wsId;window._isOwner=false;
+      _subscribe(wsId);
+    })
+    .catch(function(err){
+      // Firestore read failed (likely rules) — fall back to own
+      try{localStorage.removeItem("operix_ws_"+_uid);}catch(e){}
+      _workspaceId=_uid;_isOwner=true;
+      window._workspaceId=_uid;window._isOwner=true;
+      _subscribe(_uid);
+    });
+}
+
+// ── Firestore sync ────────────────────────────────────────
 function schedSave(){
   ["sync-dot","sync-dot2"].forEach(function(id){var e=document.getElementById(id);if(e)e.className="sdot sv";});
   ["sync-lbl","sync-lbl2"].forEach(function(id){var e=document.getElementById(id);if(e)e.textContent="Saving…";});
@@ -521,24 +571,28 @@ function schedSave(){
   _saveTimer=setTimeout(function(){
     if(!_workspaceId)return;
     var data={seq:S.seq,lastSaved:new Date().toISOString()};
-    var KEYS=["inv","pkt","proc","ord","lot","vendors","customers","dispatchers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"];
+    var KEYS=["inv","pkt","proc","ord","lot","vendors","customers","dispatchers",
+              "movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"];
     KEYS.forEach(function(k){try{data[k]=JSON.stringify(S[k]);}catch(e){}});
     _db.collection("workspaces").doc(_workspaceId).set(data,{merge:true})
       .then(function(){
         ["sync-dot","sync-dot2"].forEach(function(id){var e=document.getElementById(id);if(e)e.className="sdot ok";});
         ["sync-lbl","sync-lbl2"].forEach(function(id){var e=document.getElementById(id);if(e)e.textContent="Synced";});
-      }).catch(function(){
+      }).catch(function(err){
         ["sync-dot","sync-dot2"].forEach(function(id){var e=document.getElementById(id);if(e)e.className="sdot er";});
         ["sync-lbl","sync-lbl2"].forEach(function(id){var e=document.getElementById(id);if(e)e.textContent="Error";});
       });
   },1200);
 }
+
 function _loadData(d){
-  var KEYS=["inv","pkt","proc","ord","lot","vendors","customers","dispatchers","movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"];
+  var KEYS=["inv","pkt","proc","ord","lot","vendors","customers","dispatchers",
+            "movements","boxConfigs","boxes","pattri","history","allowedUsers","backups"];
   KEYS.forEach(function(k){try{if(d[k]!=null)S[k]=JSON.parse(d[k]);}catch(e){}});
   if(d.seq)S.seq=d.seq;
   if(!S.dispatchers)S.dispatchers=[];
 }
+
 function _subscribe(wsId){
   if(_unsub)_unsub();
   var t=setTimeout(function(){showApp();render();},6000);
@@ -546,30 +600,94 @@ function _subscribe(wsId){
     clearTimeout(t);
     if(doc.exists)_loadData(doc.data());
     showApp();render();
-  },function(){clearTimeout(t);showApp();render();});
+  },function(err){
+    clearTimeout(t);showApp();render();
+  });
 }
+
+// ── Team workspace functions ──────────────────────────────
 function joinWorkspace(wsId){
-  wsId=(wsId||"").trim();if(!wsId)return;
-  _db.collection("workspaces").doc(wsId).get().then(function(doc){
-    if(doc.exists){
-      _workspaceId=wsId;_isOwner=false;window._workspaceId=wsId;window._isOwner=false;
+  // wsId can come from input or argument
+  if(!wsId){
+    var el=document.getElementById("ws-join-id");
+    wsId=el?el.value.trim():"";
+  }
+  wsId=(wsId||"").trim();
+  if(!wsId){toast("Enter a Workspace ID","warn");return;}
+  if(wsId===_uid){toast("That is your own Workspace ID","info");return;}
+  showLoad("Verifying access…");
+  _db.collection("workspaces").doc(wsId).get()
+    .then(function(doc){
+      if(!doc.exists){
+        showApp();
+        toast("Workspace not found — check the ID and try again","warn");
+        return;
+      }
+      var data=doc.data();
+      var allowed=[];
+      try{allowed=JSON.parse(data.allowedUsers||"[]");}catch(e){}
+      // Check access by email OR uid
+      var hasAccess=allowed.indexOf(window._userEmail)>=0||allowed.indexOf(_uid)>=0;
+      if(!hasAccess){
+        showApp();
+        toast("Access denied. Ask the owner to add: "+window._userEmail+" in Team Access → Team Members","warn");
+        return;
+      }
+      // Grant access
+      _workspaceId=wsId;_isOwner=false;
+      window._workspaceId=wsId;window._isOwner=false;
       try{localStorage.setItem("operix_ws_"+_uid,wsId);}catch(e){}
-      _loadData(doc.data());_subscribe(wsId);closeM();render();toast("Joined workspace","ok");
-    }else toast("Workspace not found","warn");
-  }).catch(function(){toast("Error","warn");});
+      // Subscribe to real-time updates from shared workspace
+      _subscribe(wsId);
+      // Clear input
+      var el=document.getElementById("ws-join-id");
+      if(el)el.value="";
+      toast("✓ Joined workspace! Loading shared data…","ok");
+    })
+    .catch(function(err){
+      showApp();
+      // If permission denied by Firestore rules, show helpful message
+      if(err.code==="permission-denied"){
+        toast("Permission denied by Firestore. See Team Access for rules setup.","warn");
+      } else {
+        toast("Error: "+err.message,"warn");
+      }
+    });
 }
+
 function leaveWorkspace(){
-  if(!confirm("Return to your own workspace?"))return;
-  _isOwner=true;_workspaceId=_uid;window._workspaceId=_uid;window._isOwner=true;
+  if(!confirm("Leave this workspace and return to your own data?"))return;
   try{localStorage.removeItem("operix_ws_"+_uid);}catch(e){}
-  _subscribe(_uid);toast("Returned to your workspace","info");
+  _workspaceId=_uid;_isOwner=true;
+  window._workspaceId=_uid;window._isOwner=true;
+  _subscribe(_uid);
+  toast("Returned to your own workspace","info");
 }
+
 function transferAdmin(){
   var sel=document.getElementById("ws-transfer-email");
   if(!sel||!sel.value){toast("Select a member","warn");return;}
-  _db.collection("workspaces").doc(_workspaceId).set({pendingTransfer:sel.value},{merge:true})
-    .then(function(){toast("Transfer requested","ok");}).catch(function(){toast("Error","warn");});
+  _db.collection("workspaces").doc(_workspaceId)
+    .set({pendingTransfer:sel.value},{merge:true})
+    .then(function(){toast("Transfer requested","ok");})
+    .catch(function(){toast("Error","warn");});
 }
+
+function copyWsId(){
+  var wsId=window._workspaceId||window._uid||"";
+  if(!wsId)return;
+  navigator.clipboard.writeText(wsId).then(function(){
+    toast("Workspace ID copied!","ok");
+  }).catch(function(){
+    // Fallback
+    var el=document.createElement("input");
+    el.value=wsId;document.body.appendChild(el);
+    el.select();document.execCommand("copy");
+    document.body.removeChild(el);
+    toast("Workspace ID copied!","ok");
+  });
+}
+
 _auth.getRedirectResult().then(function(r){if(r&&r.user)_onUser(r.user);}).catch(function(){});
 _auth.onAuthStateChanged(function(user){if(!user){showLogin();return;}_onUser(user);});
 } // end firebase defined check
@@ -5077,7 +5195,7 @@ function pTeam(){
   var ownWsId=window._uid||"";
   var html="";
 
-  // ── Current workspace status
+  // ── Current workspace status ──────────────────────────────
   html+='<div style="background:var(--S);border:1px solid var(--bd);border-radius:var(--RL);padding:16px;margin-bottom:16px">';
   html+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">';
   html+='<div style="width:36px;height:36px;border-radius:10px;background:'+(isOwner?"var(--g1)":"var(--b1)")+';display:flex;align-items:center;justify-content:center;font-size:18px">'+(isOwner?"👑":"🔗")+'</div>';
@@ -5085,65 +5203,81 @@ function pTeam(){
   html+='<div style="font-size:11.5px;color:var(--hx);margin-top:2px">Workspace ID: <span style="font-family:DM Mono,monospace;color:var(--at)">'+wsId+'</span></div></div></div>';
   if(isOwner){
     html+='<div style="font-size:12.5px;color:var(--mx);margin-bottom:10px">Share your <strong>Workspace ID</strong> with teammates. They enter it in their app to access the same data.</div>';
-    // Transfer ownership option
-    html+='<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--bd)">';
-    html+='<div style="font-size:12px;font-weight:600;color:var(--y2);margin-bottom:6px">🔑 Transfer Admin / Ownership</div>';
-    html+='<div style="font-size:11.5px;color:var(--hx);margin-bottom:8px">Transfer full ownership to a team member. They become the new admin. You retain access as a member.</div>';
-    html+='<div style="display:flex;gap:8px;align-items:flex-end">';
-    html+='<div class="fg" style="flex:1"><label class="fl">Member email to promote</label>';
-    html+='<select class="fi" id="ws-transfer-email"><option value="">— Select member —</option>';
-    (S.allowedUsers||[]).forEach(function(m){ html+='<option value="'+m+'">'+m+'</option>'; });
-    html+='</select></div>';
-    html+='<button class="btn" style="background:var(--y1);color:var(--y2);border-color:var(--y2)" onclick="transferAdmin()">🔑 Transfer</button>';
-    html+='</div></div>';
-    html+='<div style="display:flex;align-items:center;gap:8px;background:var(--S2);border-radius:var(--R);padding:10px 13px">';
+    html+='<div style="display:flex;align-items:center;gap:8px;background:var(--S2);border-radius:var(--R);padding:10px 13px;margin-bottom:10px">';
     html+='<span style="font-family:DM Mono,monospace;font-size:13px;color:var(--at);flex:1;word-break:break-all">'+wsId+'</span>';
     html+='<button class="btn xs pr" onclick="copyWsId()">📋 Copy</button></div>';
-  }else{
-    html+='<div style="font-size:12.5px;color:var(--mx);margin-bottom:10px">You are accessing <strong>someone else&#39;s workspace</strong>. Your changes affect shared data.</div>';
-    html+='<button class="btn sm dn" onclick="leaveWorkspace()">🚪 Leave Workspace (switch to own data)</button>';
+    // Transfer ownership
+    if((S.allowedUsers||[]).length){
+      html+='<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--bd)">';
+      html+='<div style="font-size:12px;font-weight:600;color:var(--y2);margin-bottom:6px">🔑 Transfer Admin / Ownership</div>';
+      html+='<div style="display:flex;gap:8px;align-items:flex-end">';
+      html+='<div class="fg" style="flex:1"><label class="fl">Member email to promote</label>';
+      html+='<select class="fi" id="ws-transfer-email"><option value="">— Select member —</option>';
+      (S.allowedUsers||[]).forEach(function(m){html+='<option value="'+m+'">'+m+'</option>';});
+      html+='</select></div>';
+      html+='<button class="btn" style="background:var(--y1);color:var(--y2);border-color:var(--y2)" onclick="transferAdmin()">🔑 Transfer</button>';
+      html+='</div></div>';
+    }
+  } else {
+    html+='<div style="font-size:12.5px;color:var(--mx);margin-bottom:10px">You are accessing <strong>someone else\'s workspace</strong>. Your changes affect shared data.</div>';
+    html+='<button class="btn sm dn" onclick="leaveWorkspace()">🚪 Leave Workspace</button>';
   }
   html+='</div>';
 
-  // ── Join workspace section
+  // ── Join workspace ──────────────────────────────────────
   html+='<div style="background:var(--S);border:1px solid var(--bd);border-radius:var(--RL);padding:16px;margin-bottom:16px">';
   html+='<div style="font-size:13.5px;font-weight:600;margin-bottom:4px">🔗 Join a Workspace</div>';
-  html+='<div style="font-size:12px;color:var(--hx);margin-bottom:10px">Enter a Workspace ID shared by your team owner to access their data.</div>';
+  html+='<div style="font-size:12px;color:var(--hx);margin-bottom:10px">Enter the Workspace ID shared by your team owner. You must be added to their team first.</div>';
   html+='<div style="display:flex;gap:8px;align-items:flex-end">';
-  html+='<div class="fg" style="flex:1"><label class="fl">Workspace ID</label><input class="fi" id="ws-join-id" placeholder="Paste workspace ID here…" style="font-family:DM Mono,monospace"></div>';
+  html+='<div class="fg" style="flex:1"><label class="fl">Workspace ID</label><input class="fi" id="ws-join-id" placeholder="Paste workspace ID here\u2026" style="font-family:DM Mono,monospace" onkeydown="if(event.key===\'Enter\')joinWorkspace()"></div>';
   html+='<button class="btn pr" onclick="joinWorkspace()">🔗 Join</button>';
   html+='</div></div>';
 
-  // ── Allowed users (owner only)
+  // ── Allowed users (owner only) ──────────────────────────
   if(isOwner){
     html+='<div style="background:var(--S);border:1px solid var(--bd);border-radius:var(--RL);padding:16px;margin-bottom:16px">';
     html+='<div style="font-size:13.5px;font-weight:600;margin-bottom:4px">👥 Team Members</div>';
-    html+='<div style="font-size:12px;color:var(--hx);margin-bottom:12px">Add email addresses of people you want to grant access to your workspace. They must sign in with Google using that email.</div>';
+    html+='<div style="font-size:12px;color:var(--hx);margin-bottom:12px">Add Gmail addresses of team members. They sign in with Google using that email, then enter your Workspace ID above to join.</div>';
     html+='<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:12px">';
-    html+='<div class="fg" style="flex:1"><label class="fl">Team member email</label><input class="fi" id="ws-add-email" type="email" placeholder="teammate@gmail.com"></div>';
+    html+='<div class="fg" style="flex:1"><label class="fl">Member Gmail</label><input class="fi" id="ws-add-email" type="email" placeholder="teammate@gmail.com" onkeydown="if(event.key===\'Enter\')addTeamMember()"></div>';
     html+='<button class="btn pr" onclick="addTeamMember()">+ Add</button></div>';
     var members=S.allowedUsers||[];
     if(members.length){
-      html+='<div class="tw"><table><thead><tr><th>#</th><th>Email / User ID</th><th>Access</th><th>Action</th></tr></thead><tbody>';
+      html+='<div class="tw"><table><thead><tr><th>#</th><th>Email</th><th>Access</th><th>Action</th></tr></thead><tbody>';
       members.forEach(function(m,i){
-        html+='<tr class="dr"><td class="d">'+(i+1)+'</td><td style="font-family:DM Mono,monospace;font-size:12px">'+m+'</td><td>'+bx("g","Full Access")+'</td>';
+        html+='<tr class="dr"><td class="d">'+(i+1)+'</td>';
+        html+='<td style="font-family:DM Mono,monospace;font-size:12px">'+m+'</td>';
+        html+='<td>'+bx("g","Full Access")+'</td>';
         html+='<td><button class="btn xs dn" onclick="removeTeamMember('+i+')">✕ Remove</button></td></tr>';
       });
       html+='</tbody></table></div>';
-    }else{
-      html+='<div style="color:var(--hx);font-size:13px;padding:10px 0">No team members added yet. Add email addresses above.</div>';
+    } else {
+      html+='<div style="color:var(--hx);font-size:13px;padding:10px 0">No team members yet. Add Gmail addresses above.</div>';
     }
     html+='</div>';
   }
 
-  // ── How it works info box
+  // ── Firestore rules — CRITICAL for team access ──────────
+  html+='<div style="background:rgba(217,119,6,.08);border:1px solid rgba(217,119,6,.3);border-radius:var(--RL);padding:14px 16px;margin-bottom:16px">';
+  html+='<div style="font-size:13px;font-weight:700;color:var(--at);margin-bottom:8px">⚠️ Required: Update Firestore Security Rules</div>';
+  html+='<div style="font-size:12px;color:var(--mx);margin-bottom:10px">For team members to access shared data, update your Firestore rules in Firebase Console:</div>';
+  html+='<div style="font-size:11px;color:var(--hx);margin-bottom:6px">Firebase Console → Firestore → Rules → Replace with:</div>';
+  html+='<pre style="background:var(--S2);border:1px solid var(--bd);border-radius:var(--R);padding:10px;font-size:11px;color:var(--g2);overflow-x:auto;white-space:pre-wrap;margin-bottom:8px">';
+  html+='rules_version = \'2\';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /workspaces/{userId} {\n      allow read, write: if request.auth != null\n        && (\n          request.auth.uid == userId\n          || (resource != null && request.auth.token.email in resource.data.allowedUsers)\n          || (resource == null && request.auth.uid != null)\n        );\n    }\n  }\n}';
+  html+='</pre>';
+  html+='<button class="btn xs pr" onclick="navigator.clipboard.writeText(\'rules_version = \\\'2\\\';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /workspaces/{userId} {\n      allow read, write: if request.auth != null\n        && (\n          request.auth.uid == userId\n          || (resource != null && request.auth.token.email in resource.data.allowedUsers)\n          || (resource == null && request.auth.uid != null)\n        );\n    }\n  }\n}\').then(function(){toast(\'Rules copied! Paste in Firebase Console\',\'ok\');})">📋 Copy Rules</button>';
+  html+='</div>';
+
+  // ── How it works ──────────────────────────────────────────
   html+='<div style="background:var(--b1);border:1px solid rgba(96,165,250,.2);border-radius:var(--RL);padding:14px 16px">';
   html+='<div style="font-size:12.5px;font-weight:600;color:var(--b2);margin-bottom:8px">ℹ How Team Access Works</div>';
-  html+='<div style="font-size:12px;color:var(--mx);line-height:1.7">';
-  html+='<strong>Owner</strong> — The person who created the warehouse data. Has full control.<br>';
-  html+='<strong>Members</strong> — People added by the owner. Can view and edit all data.<br>';
-  html+='<strong>To add a member:</strong> Owner adds their Gmail → Member opens the app → goes to Team tab → enters the Workspace ID → clicks Join.<br>';
-  html+='<strong>Data stays in one place</strong> — All members read and write to the owner&#39;s Firestore document. Changes sync in real time.';
+  html+='<div style="font-size:12px;color:var(--mx);line-height:1.8">';
+  html+='<strong>Step 1 (Owner):</strong> Update Firestore Rules above → click Save<br>';
+  html+='<strong>Step 2 (Owner):</strong> Add teammate\'s Gmail in Team Members above<br>';
+  html+='<strong>Step 3 (Member):</strong> Sign in with their Google account<br>';
+  html+='<strong>Step 4 (Member):</strong> Go to Team tab → paste Workspace ID → click Join<br>';
+  html+='<strong>Step 5:</strong> All members see and edit the same data in real time<br>';
+  html+='<strong>Leave:</strong> Member can click "Leave Workspace" to return to their own data.';
   html+='</div></div>';
   return html;
 }
@@ -5226,20 +5360,24 @@ function leaveWorkspace(){
 }
 
 function addTeamMember(){
-  var email=(document.getElementById("ws-add-email")||{value:""}).value.trim().toLowerCase();
-  if(!email||!email.includes("@")){toast("Enter a valid email","warn");return;}
+  var el=document.getElementById("ws-add-email");
+  var email=(el?el.value:"").trim().toLowerCase();
+  if(!email||!email.includes("@")){toast("Enter a valid email address","warn");return;}
   if(!S.allowedUsers)S.allowedUsers=[];
-  if(S.allowedUsers.includes(email)){toast("Already added","info");return;}
+  if(S.allowedUsers.indexOf(email)>=0){toast("Already in team","info");return;}
   S.allowedUsers.push(email);
-  schedSave();render();toast(email+" added to team ✓","ok");
-  logHistory("add_team_member",email,"granted workspace access");
+  if(el)el.value="";
+  schedSave();render();
+  toast(email+" added to team. They can now join using Workspace ID: "+(window._workspaceId||window._uid||""),"ok");
 }
 
 function removeTeamMember(i){
-  if(!confirm("Remove this team member?"))return;
-  var removed=S.allowedUsers.splice(i,1)[0];
-  schedSave();render();toast(removed+" removed","info");
-  logHistory("remove_team_member",removed,"revoked workspace access");
+  if(!S.allowedUsers||!S.allowedUsers[i])return;
+  var email=S.allowedUsers[i];
+  if(!confirm("Remove "+email+" from team?"))return;
+  S.allowedUsers.splice(i,1);
+  schedSave();render();
+  toast(email+" removed from team","info");
 }
 
 
